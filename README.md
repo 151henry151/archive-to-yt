@@ -145,12 +145,12 @@ This will:
 
 ## How It Works
 
-1. **Metadata Extraction**: Scrapes the archive.org page to extract:
-   - Track list with names
+1. **Metadata Extraction**: Uses Archive.org Metadata API to extract:
+   - Track list with names (parsed from description)
    - Artist, venue, date, location
    - Credits (taped by, transferred by)
    - Background image URL
-   - Audio file URLs
+   - Audio file URLs (directly from API file list)
 
 2. **Audio Download**: Downloads each audio track from archive.org
 

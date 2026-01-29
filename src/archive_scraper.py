@@ -1,22 +1,21 @@
 """
-Archive.org metadata scraper.
+Archive.org metadata scraper using the Archive.org Metadata API.
 
-Extracts track information, metadata, and background images from archive.org detail pages.
+Extracts track information, metadata, and background images from archive.org items.
 """
 
 import re
 import logging
 from typing import Dict, List, Optional
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 import requests
-from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
 
 class ArchiveScraper:
-    """Scraper for archive.org detail pages."""
+    """Scraper for archive.org items using the Metadata API."""
 
     def __init__(self, url: str):
         """
@@ -27,7 +26,7 @@ class ArchiveScraper:
         """
         self.url = url
         self.identifier = self._extract_identifier(url)
-        self.soup = None
+        self.api_data = None
         self.metadata = {}
 
     @staticmethod
@@ -39,331 +38,255 @@ class ArchiveScraper:
             raise ValueError(f"Invalid archive.org URL format: {url}")
         return match.group(1)
 
-    def fetch_page(self) -> None:
-        """Fetch and parse the archive.org detail page."""
-        logger.info(f"Fetching archive.org page: {self.url}")
+    def fetch_api_data(self) -> None:
+        """Fetch metadata from Archive.org Metadata API."""
+        api_url = f"https://archive.org/metadata/{self.identifier}"
+        logger.info(f"Fetching metadata from Archive.org API: {api_url}")
         try:
-            response = requests.get(self.url, timeout=30)
+            response = requests.get(api_url, timeout=30)
             response.raise_for_status()
-            self.soup = BeautifulSoup(response.content, 'html.parser')
-            logger.info("Successfully fetched archive.org page")
+            self.api_data = response.json()
+            logger.info("Successfully fetched metadata from Archive.org API")
         except requests.RequestException as e:
-            logger.error(f"Failed to fetch archive.org page: {e}")
+            logger.error(f"Failed to fetch metadata from Archive.org API: {e}")
+            raise
+        except ValueError as e:
+            logger.error(f"Failed to parse JSON response: {e}")
             raise
 
     def extract_metadata(self) -> Dict:
         """
-        Extract all metadata from the page.
+        Extract all metadata from the API response.
 
         Returns:
             Dictionary containing all extracted metadata
         """
-        if not self.soup:
-            self.fetch_page()
+        if not self.api_data:
+            self.fetch_api_data()
 
-        logger.info("Extracting metadata from archive.org page")
+        logger.info("Extracting metadata from Archive.org API response")
+
+        # Get metadata dictionary from API
+        api_metadata = self.api_data.get('metadata', {})
+        files = self.api_data.get('files', [])
+
+        # Extract tracks from description
+        # Archive.org API may have description as string or list
+        description_raw = api_metadata.get('description', '')
+        if isinstance(description_raw, list):
+            description = ' '.join(str(d) for d in description_raw)
+        else:
+            description = str(description_raw) if description_raw else ''
+        tracks = self._extract_tracks_from_description(description)
+
+        # If no tracks found in description, try to infer from filenames
+        if not tracks:
+            tracks = self._extract_tracks_from_files(files)
+
+        # Extract background image
+        background_image_url = self._extract_background_image(files)
 
         metadata = {
             'identifier': self.identifier,
             'url': self.url,
-            'title': self._extract_title(),
-            'artist': self._extract_artist(),
-            'venue': self._extract_venue(),
-            'location': self._extract_location(),
-            'date': self._extract_date(),
-            'year': self._extract_year(),
-            'taped_by': self._extract_taped_by(),
-            'transferred_by': self._extract_transferred_by(),
-            'lineage': self._extract_lineage(),
-            'topics': self._extract_topics(),
-            'collection': self._extract_collection(),
-            'description': self._extract_full_description(),
-            'tracks': self._extract_tracks(),
-            'background_image_url': self._extract_background_image(),
+            'title': api_metadata.get('title', '').strip(),
+            'artist': self._extract_artist(api_metadata),
+            'venue': api_metadata.get('venue', '').strip(),
+            'location': api_metadata.get('location', '').strip(),
+            'date': api_metadata.get('date', '').strip(),
+            'year': api_metadata.get('year', '').strip(),
+            'taped_by': api_metadata.get('tapedby', '').strip() or api_metadata.get('taped_by', '').strip(),
+            'transferred_by': api_metadata.get('transferredby', '').strip() or api_metadata.get('transferred_by', '').strip(),
+            'lineage': api_metadata.get('lineage', '').strip(),
+            'topics': self._extract_topics(api_metadata),
+            'collection': api_metadata.get('collection', '').strip(),
+            'description': description,
+            'tracks': tracks,
+            'background_image_url': background_image_url,
         }
 
         self.metadata = metadata
-        logger.info(f"Extracted metadata: {len(metadata.get('tracks', []))} tracks found")
+        logger.info(f"Extracted metadata: {len(tracks)} tracks found")
         return metadata
 
-    def _extract_title(self) -> str:
-        """Extract title from page."""
-        # Try multiple selectors for title
-        title_elem = (
-            self.soup.select_one('h1.item-title') or
-            self.soup.select_one('meta[property="og:title"]') or
-            self.soup.select_one('title')
+    def _extract_artist(self, api_metadata: Dict) -> str:
+        """Extract artist/band name from metadata."""
+        # Try various field names
+        artist = (
+            api_metadata.get('band') or
+            api_metadata.get('artist') or
+            api_metadata.get('creator') or
+            api_metadata.get('band/artist') or
+            ''
         )
-        if title_elem:
-            title = title_elem.get('content') if title_elem.name == 'meta' else title_elem.get_text(strip=True)
-            # Remove "by Artist" suffix if present
-            title = re.sub(r'\s+by\s+.*$', '', title, flags=re.IGNORECASE)
-            return title.strip()
-        return ""
-
-    def _extract_artist(self) -> str:
-        """Extract artist/band name."""
-        # Look for "by Artist" in title or metadata
-        title_elem = self.soup.select_one('h1.item-title')
-        if title_elem:
-            match = re.search(r'by\s+(.+?)(?:\s*$|\s*Publication)', title_elem.get_text(), re.IGNORECASE)
+        
+        # If artist is in title (format: "Title by Artist"), extract it
+        if not artist:
+            title = api_metadata.get('title', '')
+            match = re.search(r'by\s+(.+?)(?:\s*$|\s*Publication)', title, re.IGNORECASE)
             if match:
-                return match.group(1).strip()
+                artist = match.group(1).strip()
+        
+        return artist.strip()
 
-        # Try metadata field
-        metadata = self.soup.find('div', class_='item-details')
-        if metadata:
-            for row in metadata.find_all('div', class_='metadata-row'):
-                label = row.find('div', class_='metadata-label')
-                if label and 'band' in label.get_text().lower() or 'artist' in label.get_text().lower():
-                    value = row.find('div', class_='metadata-value')
-                    if value:
-                        return value.get_text(strip=True)
-        return ""
+    def _extract_topics(self, api_metadata: Dict) -> List[str]:
+        """Extract topics from metadata."""
+        topics_str = api_metadata.get('subject', '') or api_metadata.get('topics', '')
+        if topics_str:
+            # Topics can be a string or semicolon-separated list
+            if isinstance(topics_str, list):
+                return [t.strip() for t in topics_str if t.strip()]
+            else:
+                # Split by semicolon or comma
+                topics = re.split(r'[;,]', topics_str)
+                return [t.strip() for t in topics if t.strip()]
+        return []
 
-    def _extract_venue(self) -> str:
-        """Extract venue information."""
-        metadata = self.soup.find('div', class_='item-details')
-        if metadata:
-            for row in metadata.find_all('div', class_='metadata-row'):
-                label = row.find('div', class_='metadata-label')
-                if label and 'venue' in label.get_text().lower():
-                    value = row.find('div', class_='metadata-value')
-                    if value:
-                        return value.get_text(strip=True)
-        return ""
-
-    def _extract_location(self) -> str:
-        """Extract location information."""
-        metadata = self.soup.find('div', class_='item-details')
-        if metadata:
-            for row in metadata.find_all('div', class_='metadata-row'):
-                label = row.find('div', class_='metadata-label')
-                if label and 'location' in label.get_text().lower():
-                    value = row.find('div', class_='metadata-value')
-                    if value:
-                        return value.get_text(strip=True)
-        return ""
-
-    def _extract_date(self) -> str:
-        """Extract publication/recording date."""
-        metadata = self.soup.find('div', class_='item-details')
-        if metadata:
-            for row in metadata.find_all('div', class_='metadata-row'):
-                label = row.find('div', class_='metadata-label')
-                if label and 'publication date' in label.get_text().lower():
-                    value = row.find('div', class_='metadata-value')
-                    if value:
-                        date_text = value.get_text(strip=True)
-                        # Extract just the date part (YYYY-MM-DD)
-                        match = re.search(r'(\d{4}-\d{2}-\d{2})', date_text)
-                        if match:
-                            return match.group(1)
-        return ""
-
-    def _extract_year(self) -> str:
-        """Extract year."""
-        date = self._extract_date()
-        if date:
-            match = re.search(r'(\d{4})', date)
-            if match:
-                return match.group(1)
-
-        metadata = self.soup.find('div', class_='item-details')
-        if metadata:
-            for row in metadata.find_all('div', class_='metadata-row'):
-                label = row.find('div', class_='metadata-label')
-                if label and 'year' in label.get_text().lower():
-                    value = row.find('div', class_='metadata-value')
-                    if value:
-                        return value.get_text(strip=True)
-        return ""
-
-    def _extract_taped_by(self) -> str:
-        """Extract 'Taped by' credit."""
-        metadata = self.soup.find('div', class_='item-details')
-        if metadata:
-            for row in metadata.find_all('div', class_='metadata-row'):
-                label = row.find('div', class_='metadata-label')
-                if label and 'taped by' in label.get_text().lower():
-                    value = row.find('div', class_='metadata-value')
-                    if value:
-                        return value.get_text(strip=True)
-        return ""
-
-    def _extract_transferred_by(self) -> str:
-        """Extract 'Transferred by' credit."""
-        metadata = self.soup.find('div', class_='item-details')
-        if metadata:
-            for row in metadata.find_all('div', class_='metadata-row'):
-                label = row.find('div', class_='metadata-label')
-                if label and 'transferred by' in label.get_text().lower():
-                    value = row.find('div', class_='metadata-value')
-                    if value:
-                        return value.get_text(strip=True)
-        return ""
-
-    def _extract_lineage(self) -> str:
-        """Extract lineage information."""
-        metadata = self.soup.find('div', class_='item-details')
-        if metadata:
-            for row in metadata.find_all('div', class_='metadata-row'):
-                label = row.find('div', class_='metadata-label')
-                if label and 'lineage' in label.get_text().lower():
-                    value = row.find('div', class_='metadata-value')
-                    if value:
-                        return value.get_text(strip=True)
-        return ""
-
-    def _extract_topics(self) -> List[str]:
-        """Extract topics."""
-        topics = []
-        metadata = self.soup.find('div', class_='item-details')
-        if metadata:
-            for row in metadata.find_all('div', class_='metadata-row'):
-                label = row.find('div', class_='metadata-label')
-                if label and 'topics' in label.get_text().lower():
-                    value = row.find('div', class_='metadata-value')
-                    if value:
-                        links = value.find_all('a')
-                        topics = [link.get_text(strip=True) for link in links]
-        return topics
-
-    def _extract_collection(self) -> str:
-        """Extract collection name."""
-        metadata = self.soup.find('div', class_='item-details')
-        if metadata:
-            for row in metadata.find_all('div', class_='metadata-row'):
-                label = row.find('div', class_='metadata-label')
-                if label and 'collection' in label.get_text().lower():
-                    value = row.find('div', class_='metadata-value')
-                    if value:
-                        return value.get_text(strip=True)
-        return ""
-
-    def _extract_full_description(self) -> str:
-        """Extract full description text from the page."""
-        # Try to find description in various places
-        desc_elem = (
-            self.soup.select_one('div.item-description') or
-            self.soup.select_one('div#descript') or
-            self.soup.select_one('meta[name="description"]')
-        )
-        if desc_elem:
-            if desc_elem.name == 'meta':
-                return desc_elem.get('content', '')
-            return desc_elem.get_text(strip=True)
-        return ""
-
-    def _extract_tracks(self) -> List[Dict[str, str]]:
+    def _extract_tracks_from_description(self, description: str) -> List[Dict[str, str]]:
         """
-        Extract track list from the page.
+        Extract track list from description text.
 
         Returns:
             List of dictionaries with 'number' and 'name' keys
         """
         tracks = []
+        if not description:
+            return tracks
 
-        # Look for track list in various formats
-        # Format 1: Numbered list in description or metadata
-        description = self._extract_full_description()
-        track_pattern = r'(\d{2})\.\s*(.+?)(?:\n|$)'
-        matches = re.findall(track_pattern, description, re.MULTILINE)
-        if matches:
-            for number, name in matches:
-                tracks.append({
-                    'number': number,
-                    'name': name.strip()
-                })
+        # Look for numbered track list patterns
+        # Format: "01. Track Name" or "1. Track Name"
+        track_patterns = [
+            r'(\d{2})\.\s*(.+?)(?:\n|$)',  # Two-digit format: 01. Track
+            r'(\d{1,2})\.\s*(.+?)(?:\n|$)',  # One or two digit: 1. Track or 01. Track
+        ]
 
-        # Format 2: Look in item-description or other text areas
-        if not tracks:
-            desc_elem = self.soup.select_one('div.item-description')
-            if desc_elem:
-                text = desc_elem.get_text()
-                matches = re.findall(track_pattern, text, re.MULTILINE)
+        for pattern in track_patterns:
+            matches = re.findall(pattern, description, re.MULTILINE)
+            if matches:
                 for number, name in matches:
+                    # Pad single digits to two digits
+                    track_num = number.zfill(2)
                     tracks.append({
-                        'number': number,
+                        'number': track_num,
                         'name': name.strip()
                     })
-
-        # Format 3: Look for audio file names that might indicate tracks
-        if not tracks:
-            # Try to infer from file names
-            audio_files = self._find_audio_files()
-            for i, audio_file in enumerate(audio_files, 1):
-                # Extract track name from filename if possible
-                filename = audio_file.get('filename', '')
-                track_name = re.sub(r'\.(flac|mp3|wav|m4a)$', '', filename, flags=re.IGNORECASE)
-                tracks.append({
-                    'number': f"{i:02d}",
-                    'name': track_name
-                })
+                break  # Use first pattern that finds matches
 
         return tracks
 
-    def _extract_background_image(self) -> Optional[str]:
+    def _extract_tracks_from_files(self, files: List[Dict]) -> List[Dict[str, str]]:
         """
-        Extract background image URL from the page.
+        Try to infer tracks from audio file names.
+
+        Returns:
+            List of dictionaries with 'number' and 'name' keys
+        """
+        tracks = []
+        audio_extensions = ['.flac', '.mp3', '.wav', '.m4a', '.ogg', '.oggvorbis']
+        
+        # Filter audio files and sort them
+        audio_files = [
+            f for f in files 
+            if any(f.get('name', '').lower().endswith(ext) for ext in audio_extensions)
+        ]
+        
+        # Sort by filename to maintain order
+        audio_files.sort(key=lambda x: x.get('name', '').lower())
+        
+        for i, audio_file in enumerate(audio_files, 1):
+            filename = audio_file.get('name', '')
+            # Try to extract track number from filename
+            track_num_match = re.search(r'(\d{1,2})', filename)
+            if track_num_match:
+                track_num = track_num_match.group(1).zfill(2)
+            else:
+                track_num = f"{i:02d}"
+            
+            # Extract track name from filename (remove extension and common prefixes)
+            track_name = re.sub(r'\.(flac|mp3|wav|m4a|ogg|oggvorbis)$', '', filename, flags=re.IGNORECASE)
+            track_name = re.sub(r'^(track[-_\s]*\d+[-_\s]*)', '', track_name, flags=re.IGNORECASE)
+            track_name = track_name.strip()
+            
+            if not track_name:
+                track_name = f"Track {i}"
+            
+            tracks.append({
+                'number': track_num,
+                'name': track_name
+            })
+        
+        return tracks
+
+    def _extract_background_image(self, files: List[Dict]) -> Optional[str]:
+        """
+        Extract background image URL from files list.
 
         Returns:
             URL of the background image, or None if not found
         """
-        # Look for background image in various places
-        # Common pattern: https://ia800801.us.archive.org/14/items/IDENTIFIER/.../img.jpg
-
-        # Try to find in page metadata
-        img_elem = (
-            self.soup.select_one('img.item-img') or
-            self.soup.select_one('div.item-img img') or
-            self.soup.select_one('meta[property="og:image"]')
-        )
-
-        if img_elem:
-            img_url = img_elem.get('src') or img_elem.get('content')
-            if img_url:
-                # Make absolute URL if relative
-                if img_url.startswith('//'):
-                    img_url = 'https:' + img_url
-                elif img_url.startswith('/'):
-                    img_url = urljoin('https://archive.org', img_url)
-                return img_url
-
-        # Try to construct URL based on common pattern
-        # Pattern: https://ia*.us.archive.org/*/items/IDENTIFIER/*/img.jpg
-        base_url = f"https://archive.org/download/{self.identifier}"
-        # Try common image names
-        for img_name in ['img.jpg', 'cover.jpg', 'image.jpg', 'artwork.jpg']:
-            test_url = f"{base_url}/{img_name}"
+        # Look for common image filenames
+        image_names = ['img.jpg', 'cover.jpg', 'image.jpg', 'artwork.jpg', 'folder.jpg', 
+                      'img.png', 'cover.png', 'image.png', 'artwork.png']
+        
+        for file_info in files:
+            filename = file_info.get('name', '').lower()
+            # Check if it's a common image name
+            if filename in [img.lower() for img in image_names]:
+                # Construct download URL
+                # Pattern: https://archive.org/download/IDENTIFIER/FILENAME
+                download_url = f"https://archive.org/download/{self.identifier}/{file_info['name']}"
+                logger.info(f"Found background image: {file_info['name']}")
+                return download_url
+        
+        # Look for any image files
+        image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+        for file_info in files:
+            filename = file_info.get('name', '').lower()
+            if any(filename.endswith(ext) for ext in image_extensions):
+                # Prefer jpg/jpeg over other formats
+                if filename.endswith(('.jpg', '.jpeg')):
+                    download_url = f"https://archive.org/download/{self.identifier}/{file_info['name']}"
+                    logger.info(f"Found background image: {file_info['name']}")
+                    return download_url
+        
+        # If no image found, try common patterns
+        for img_name in image_names:
+            test_url = f"https://archive.org/download/{self.identifier}/{img_name}"
             # We'll verify this exists when we try to download it
+            logger.debug(f"Trying default image URL: {test_url}")
             return test_url
 
         return None
 
     def _find_audio_files(self) -> List[Dict[str, str]]:
         """
-        Find all audio files available for download.
+        Find all audio files from the API files list.
 
         Returns:
             List of dictionaries with file information
         """
+        if not self.api_data:
+            self.fetch_api_data()
+
+        files = self.api_data.get('files', [])
         audio_files = []
-        audio_extensions = ['.flac', '.mp3', '.wav', '.m4a', '.ogg']
+        audio_extensions = ['.flac', '.mp3', '.wav', '.m4a', '.ogg', '.oggvorbis']
 
-        # Look for download links
-        download_div = self.soup.find('div', {'id': 'download-box'})
-        if download_div:
-            for link in download_div.find_all('a', href=True):
-                href = link.get('href', '')
-                filename = link.get_text(strip=True)
-                if any(filename.lower().endswith(ext) for ext in audio_extensions):
-                    full_url = urljoin(self.url, href)
-                    audio_files.append({
-                        'filename': filename,
-                        'url': full_url
-                    })
+        for file_info in files:
+            filename = file_info.get('name', '')
+            if any(filename.lower().endswith(ext) for ext in audio_extensions):
+                # Construct download URL
+                # Pattern: https://archive.org/download/IDENTIFIER/FILENAME
+                download_url = f"https://archive.org/download/{self.identifier}/{filename}"
+                audio_files.append({
+                    'filename': filename,
+                    'url': download_url
+                })
 
+        # Sort by filename to maintain consistent order
+        audio_files.sort(key=lambda x: x['filename'].lower())
+        
+        logger.info(f"Found {len(audio_files)} audio files from API")
         return audio_files
 
     def get_audio_file_urls(self) -> List[Dict[str, str]]:
@@ -376,19 +299,41 @@ class ArchiveScraper:
         tracks = self.metadata.get('tracks', [])
         audio_files = self._find_audio_files()
 
+        if not audio_files:
+            logger.warning("No audio files found in API response")
+            return []
+
+        logger.info(f"Found {len(audio_files)} audio files, trying to match with {len(tracks)} tracks")
+
         # Try to match tracks to audio files
         track_audio = []
+        used_audio_files = set()  # Track which audio files we've used
+
         for track in tracks:
             track_num = track['number']
             track_name = track['name']
 
             # Try to find matching audio file
             matched_file = None
-            for audio_file in audio_files:
+            for i, audio_file in enumerate(audio_files):
+                if i in used_audio_files:
+                    continue
+                    
                 filename = audio_file['filename'].lower()
-                # Check if track number is in filename
-                if track_num in filename or f"track{track_num}" in filename:
+                # Check if track number is in filename (various formats)
+                track_num_str = track_num.lstrip('0')  # Remove leading zeros
+                if (track_num in filename or 
+                    track_num_str in filename or 
+                    f"track{track_num}" in filename or
+                    f"track{track_num_str}" in filename or
+                    f"track {track_num}" in filename or
+                    f"track {track_num_str}" in filename or
+                    f"track-{track_num}" in filename or
+                    f"track-{track_num_str}" in filename or
+                    f"track_{track_num}" in filename or
+                    f"track_{track_num_str}" in filename):
                     matched_file = audio_file
+                    used_audio_files.add(i)
                     break
 
             if matched_file:
@@ -398,16 +343,25 @@ class ArchiveScraper:
                     'url': matched_file['url'],
                     'filename': matched_file['filename']
                 })
-            elif audio_files:
-                # If we have audio files but couldn't match, use them in order
-                if len(track_audio) < len(audio_files):
-                    audio_file = audio_files[len(track_audio)]
-                    track_audio.append({
-                        'number': track_num,
-                        'name': track_name,
-                        'url': audio_file['url'],
-                        'filename': audio_file['filename']
-                    })
+                logger.debug(f"Matched track {track_num} to {matched_file['filename']}")
 
+        # If we have unmatched tracks but have audio files, use them in order
+        if len(track_audio) < len(tracks) and len(audio_files) > len(track_audio):
+            logger.info(f"Some tracks couldn't be matched, using audio files in order")
+            for track in tracks[len(track_audio):]:
+                # Find next unused audio file
+                for i, audio_file in enumerate(audio_files):
+                    if i not in used_audio_files:
+                        track_audio.append({
+                            'number': track['number'],
+                            'name': track['name'],
+                            'url': audio_file['url'],
+                            'filename': audio_file['filename']
+                        })
+                        used_audio_files.add(i)
+                        logger.debug(f"Assigned track {track['number']} to {audio_file['filename']} (by order)")
+                        break
+
+        # If we have more audio files than tracks, that's okay - we'll use what we matched
+        logger.info(f"Matched {len(track_audio)} tracks to audio files")
         return track_audio
-

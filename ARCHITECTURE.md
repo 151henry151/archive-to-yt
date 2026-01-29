@@ -43,26 +43,32 @@ The Archive.org to YouTube uploader is a Python application that automates the c
 
 ### 1. ArchiveScraper (`src/archive_scraper.py`)
 
-**Purpose**: Extract metadata and track information from archive.org detail pages.
+**Purpose**: Extract metadata and track information from archive.org items using the Metadata API.
 
 **Key Methods**:
-- `fetch_page()`: Downloads and parses the HTML page
-- `extract_metadata()`: Extracts all metadata fields
-- `_extract_tracks()`: Parses track list from page content
-- `_extract_background_image()`: Finds background image URL
+- `fetch_api_data()`: Fetches JSON metadata from Archive.org Metadata API
+- `extract_metadata()`: Extracts all metadata fields from API response
+- `_extract_tracks_from_description()`: Parses track list from description text
+- `_extract_tracks_from_files()`: Infers tracks from audio filenames if description parsing fails
+- `_extract_background_image()`: Finds background image from API file list
+- `_find_audio_files()`: Gets audio files directly from API file list
 - `get_audio_file_urls()`: Matches tracks to downloadable audio files
 
 **Technologies**:
-- `requests`: HTTP requests
-- `BeautifulSoup4`: HTML parsing
-- `lxml`: Fast XML/HTML parser
+- `requests`: HTTP requests to Archive.org Metadata API
+- Archive.org Metadata API: `https://archive.org/metadata/{identifier}`
+
+**API Endpoint**:
+- Uses Archive.org's public Metadata API (no authentication required)
+- Returns structured JSON with metadata and complete file list
+- More reliable than HTML scraping and future-proof
 
 **Data Extracted**:
-- Title, artist, venue, location, date
-- Credits (taped by, transferred by)
-- Track list with numbers and names
-- Background image URL
-- Audio file URLs
+- Title, artist, venue, location, date (from API metadata)
+- Credits (taped by, transferred by) (from API metadata)
+- Track list with numbers and names (parsed from description or inferred from filenames)
+- Background image URL (from API file list)
+- Audio file URLs (directly from API file list with download URLs)
 
 ### 2. AudioDownloader (`src/audio_downloader.py`)
 
@@ -172,7 +178,7 @@ The Archive.org to YouTube uploader is a Python application that automates the c
 - Archive.org detail page URL
 
 ### Processing
-1. **Metadata Extraction**: HTML → Parsed metadata dictionary
+1. **Metadata Extraction**: Archive.org API JSON → Parsed metadata dictionary
 2. **Audio Download**: URLs → Local audio files
 3. **Video Creation**: Audio + Image → MP4 video files
 4. **Formatting**: Metadata → YouTube titles/descriptions
@@ -234,9 +240,7 @@ TIMESTAMP - MODULE - LEVEL - MESSAGE
 ## Dependencies
 
 ### Python Packages
-- `requests`: HTTP client
-- `beautifulsoup4`: HTML parsing
-- `lxml`: Fast XML parser
+- `requests`: HTTP client (for Archive.org API and file downloads)
 - `google-api-python-client`: YouTube API client
 - `google-auth-oauthlib`: OAuth2 authentication
 - `google-auth-httplib2`: HTTP transport for auth
@@ -264,7 +268,7 @@ TIMESTAMP - MODULE - LEVEL - MESSAGE
 ## Performance Considerations
 
 ### Processing Time
-- Metadata extraction: ~1-2 seconds
+- Metadata extraction: ~0.5-1 second (API call is faster than HTML parsing)
 - Audio download: Depends on file size (typically 1-5 MB per track)
 - Video creation: ~10-30 seconds per track (depends on length and CPU)
 - YouTube upload: Depends on file size and connection (typically 1-5 minutes per video)
