@@ -17,7 +17,12 @@ from googleapiclient.http import MediaFileUpload
 logger = logging.getLogger(__name__)
 
 # YouTube API scopes
-SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
+# youtube.upload: Required for uploading videos
+# youtube: Required for creating playlists and managing playlist items
+SCOPES = [
+    'https://www.googleapis.com/auth/youtube.upload',
+    'https://www.googleapis.com/auth/youtube'
+]
 
 
 class YouTubeUploader:
@@ -44,6 +49,16 @@ class YouTubeUploader:
             logger.info("Loading existing YouTube API credentials...")
             try:
                 creds = Credentials.from_authorized_user_file(str(self.token_path), SCOPES)
+                # Check if token has all required scopes
+                if creds.scopes and set(creds.scopes) != set(SCOPES):
+                    logger.warning(
+                        "Existing token has different scopes. Re-authentication required for playlist creation."
+                    )
+                    logger.warning(f"Current scopes: {creds.scopes}")
+                    logger.warning(f"Required scopes: {SCOPES}")
+                    logger.warning("Deleting old token file to force re-authentication...")
+                    self.token_path.unlink()
+                    creds = None
             except Exception as e:
                 logger.warning(f"Could not load existing credentials: {e}")
 
@@ -66,6 +81,7 @@ class YouTubeUploader:
 
                 logger.info("Starting OAuth2 flow for YouTube API...")
                 logger.info("A browser window will open for authentication.")
+                logger.info("Note: You'll need to grant permissions for both video uploads AND playlist management.")
                 flow = InstalledAppFlow.from_client_secrets_file(
                     str(self.credentials_path), SCOPES
                 )
