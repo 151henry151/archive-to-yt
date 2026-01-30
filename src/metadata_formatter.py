@@ -86,6 +86,14 @@ class MetadataFormatter:
         description = ". ".join(parts)
         # Clean up any double periods or spacing issues
         description = description.replace("..", ".").replace(" .", ".")
+        
+        # Sanitize description: remove HTML tags and ensure it's valid
+        description = MetadataFormatter._sanitize_description(description)
+        
+        # Ensure description is not empty
+        if not description or len(description.strip()) == 0:
+            description = "Music track from archive.org"
+        
         return description
 
     @staticmethod
@@ -196,15 +204,61 @@ class MetadataFormatter:
         # Full description from archive.org
         full_description = metadata.get('description', '')
         if full_description:
-            parts.append(f"\nFull Description:\n{full_description}")
+            # Sanitize the full description
+            full_description = MetadataFormatter._sanitize_description(full_description)
+            if full_description:
+                parts.append(f"\nFull Description:\n{full_description}")
 
         # Original URL
         original_url = metadata.get('url', '')
         if original_url:
             parts.append(f"\nOriginal source: {original_url}")
 
-        return "\n".join(parts)
+        description = "\n".join(parts)
+        # Final sanitization of the complete description
+        description = MetadataFormatter._sanitize_description(description)
+        
+        # Ensure description is not empty
+        if not description or len(description.strip()) == 0:
+            description = "Music playlist from archive.org"
+        
+        return description
 
+    @staticmethod
+    def _sanitize_description(text: str) -> str:
+        """
+        Sanitize description text by removing HTML tags and ensuring it's valid for YouTube.
+        
+        Args:
+            text: Text to sanitize
+            
+        Returns:
+            Cleaned description text
+        """
+        import re
+        if not text:
+            return ''
+        
+        # Convert to string if not already
+        text = str(text)
+        
+        # Remove HTML tags
+        text = re.sub(r'<[^>]+>', '', text)
+        # Decode common HTML entities
+        text = text.replace('&gt;', '>').replace('&lt;', '<').replace('&amp;', '&')
+        text = text.replace('&nbsp;', ' ').replace('&quot;', '"').replace('&#39;', "'")
+        text = text.replace('&apos;', "'")
+        
+        # Clean up extra whitespace but preserve line breaks
+        text = re.sub(r'[ \t]+', ' ', text)  # Multiple spaces/tabs to single space
+        text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)  # Multiple blank lines to double
+        
+        # YouTube description limit is 5000 characters
+        if len(text) > 5000:
+            text = text[:4997] + '...'
+        
+        return text.strip()
+    
     @staticmethod
     def _sanitize_title(text: str) -> str:
         """

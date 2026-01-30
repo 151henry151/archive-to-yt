@@ -128,10 +128,22 @@ class YouTubeUploader:
         if not video_path.exists():
             raise FileNotFoundError(f"Video file not found: {video_path}")
 
+        # Validate and sanitize description
+        if description is None:
+            description = ''
+        description = str(description).strip()
+        
+        # YouTube description requirements:
+        # - Must be a string (can be empty)
+        # - Maximum 5000 characters
+        if len(description) > 5000:
+            description = description[:4997] + '...'
+            logger.warning(f"Description truncated to 5000 characters")
+        
         body = {
             'snippet': {
                 'title': title,
-                'description': description or '',  # Ensure description is not None
+                'description': description,
                 'tags': tags or [],
                 'categoryId': category_id
             },
@@ -144,6 +156,8 @@ class YouTubeUploader:
         logger.debug(f"Request body title: '{body['snippet']['title']}'")
         logger.debug(f"Request body title type: {type(body['snippet']['title'])}")
         logger.debug(f"Request body title length: {len(body['snippet']['title']) if body['snippet']['title'] else 0}")
+        logger.debug(f"Request body description length: {len(body['snippet']['description'])}")
+        logger.debug(f"Request body description preview: {body['snippet']['description'][:100]}..." if len(body['snippet']['description']) > 100 else f"Request body description: '{body['snippet']['description']}'")
 
         try:
             # Create media upload object
