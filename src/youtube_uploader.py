@@ -144,6 +144,23 @@ class YouTubeUploader:
         
         description = description.strip()
         
+        # Try to encode as ASCII with error handling - if it fails, use ASCII-safe version
+        try:
+            # Try encoding to ASCII to ensure compatibility
+            description_ascii = description.encode('ascii', errors='ignore').decode('ascii')
+            # Only use ASCII version if it's not too different (preserve original if possible)
+            if len(description_ascii) >= len(description) * 0.8:  # If we keep at least 80% of characters
+                description = description_ascii
+            else:
+                # Keep original but ensure it's valid UTF-8
+                description.encode('utf-8')
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            # If encoding fails, use ASCII-safe version
+            logger.warning("Description contains problematic characters, using ASCII-safe version")
+            description = description.encode('ascii', errors='ignore').decode('ascii')
+            if not description or len(description.strip()) == 0:
+                description = "Music track from archive.org"
+        
         # YouTube description requirements:
         # - Must be a string (can be empty)
         # - Maximum 5000 characters
@@ -164,6 +181,9 @@ class YouTubeUploader:
             logger.warning("Description is empty, using fallback")
             description = "Music track from archive.org"
         
+        # Final safety: ensure it's a plain string (not bytes, not None)
+        description = str(description) if description else "Music track from archive.org"
+        
         body = {
             'snippet': {
                 'title': title,
@@ -176,18 +196,26 @@ class YouTubeUploader:
             }
         }
         
-        # Debug: Log the actual body being sent
-        logger.debug(f"Request body title: '{body['snippet']['title']}'")
-        logger.debug(f"Request body title type: {type(body['snippet']['title'])}")
-        logger.debug(f"Request body title length: {len(body['snippet']['title']) if body['snippet']['title'] else 0}")
-        logger.debug(f"Request body description length: {len(body['snippet']['description'])}")
-        logger.debug(f"Request body description type: {type(body['snippet']['description'])}")
-        logger.debug(f"Request body description preview: {body['snippet']['description'][:100]}..." if len(body['snippet']['description']) > 100 else f"Request body description: '{body['snippet']['description']}'")
+        # Log the actual body being sent (INFO level for debugging)
+        logger.info(f"Request body title: '{body['snippet']['title']}'")
+        logger.info(f"Request body title type: {type(body['snippet']['title'])}")
+        logger.info(f"Request body title length: {len(body['snippet']['title']) if body['snippet']['title'] else 0}")
+        logger.info(f"Request body description length: {len(body['snippet']['description'])}")
+        logger.info(f"Request body description type: {type(body['snippet']['description'])}")
+        logger.info(f"Request body description (first 200 chars): {body['snippet']['description'][:200]}..." if len(body['snippet']['description']) > 200 else f"Request body description: '{body['snippet']['description']}'")
         
         # Additional validation: check if description is actually a string in the body
         if not isinstance(body['snippet']['description'], str):
             logger.error(f"Description is not a string! Type: {type(body['snippet']['description'])}, Value: {body['snippet']['description']}")
             body['snippet']['description'] = str(body['snippet']['description']) if body['snippet']['description'] else "Music track from archive.org"
+        
+        # Final check: ensure description is not None or empty
+        if body['snippet']['description'] is None:
+            logger.error("Description is None in request body, setting fallback")
+            body['snippet']['description'] = "Music track from archive.org"
+        elif not body['snippet']['description']:
+            logger.error("Description is empty in request body, setting fallback")
+            body['snippet']['description'] = "Music track from archive.org"
 
         try:
             # Create media upload object
