@@ -168,7 +168,7 @@ class ArchiveToYouTube:
                         # Format metadata
                         # Sanitize track name before formatting (extra safety)
                         track_info_clean = track_info.copy()
-                        track_name_clean = track_info_clean.get('name', '')
+                        track_name_clean = track_info_clean.get('name', 'Unknown Track')
                         # Remove HTML tags if present
                         import re
                         track_name_clean = re.sub(r'<[^>]+>', '', track_name_clean)
@@ -177,14 +177,25 @@ class ArchiveToYouTube:
                         # If track name is too long or contains multiple tracks, take first line only
                         if len(track_name_clean) > 100 or '\n' in track_name_clean:
                             track_name_clean = track_name_clean.split('\n')[0].strip()
+                        # Ensure we have a valid track name
+                        if not track_name_clean or len(track_name_clean) == 0:
+                            track_name_clean = f"Track {track_num}"
                         track_info_clean['name'] = track_name_clean
                         
                         video_title = self.metadata_formatter.format_video_title(
                             track_info_clean,
                             metadata
                         )
+                        
+                        # Final validation of title
+                        if not video_title or not video_title.strip():
+                            logger.error(f"Generated empty title for track {track_num}, using fallback")
+                            video_title = f"Track {track_num} - {track_name_clean}"
+                        
+                        logger.debug(f"Final video title: '{video_title}' (length: {len(video_title)})")
+                        
                         video_description = self.metadata_formatter.format_track_description(
-                            track_info,
+                            track_info_clean,
                             metadata
                         )
 

@@ -245,6 +245,11 @@ class MetadataFormatter:
         # Sanitize track name to remove HTML tags
         track_name = MetadataFormatter._sanitize_title(track_name)
         
+        # Ensure track name is not empty after sanitization
+        if not track_name or len(track_name.strip()) == 0:
+            track_num = track.get('number', '01')
+            track_name = f"Track {track_num}"
+        
         artist = metadata.get('artist', '')
         date = metadata.get('date', '')
 
@@ -261,5 +266,12 @@ class MetadataFormatter:
 
         title = " - ".join(parts)
         # Final sanitization of the complete title
-        return MetadataFormatter._sanitize_title(title)
+        title = MetadataFormatter._sanitize_title(title)
+        
+        # Final safety check - ensure title is not empty
+        if not title or len(title.strip()) == 0:
+            track_num = track.get('number', '01')
+            title = f"Track {track_num}"
+        
+        return title
 

@@ -105,8 +105,25 @@ class YouTubeUploader:
         Returns:
             YouTube video ID
         """
+        # Validate and sanitize title
+        if not title or not title.strip():
+            raise ValueError("Video title cannot be empty")
+        
+        # Ensure title is a string and strip whitespace
+        title = str(title).strip()
+        
+        # YouTube title requirements:
+        # - Must be between 1 and 100 characters
+        # - Cannot be empty
+        if len(title) == 0:
+            raise ValueError("Video title cannot be empty after sanitization")
+        if len(title) > 100:
+            title = title[:97] + '...'
+            logger.warning(f"Title truncated to 100 characters: {title}")
+        
         logger.info(f"Uploading video: {title}")
         logger.info(f"Video file: {video_path}")
+        logger.debug(f"Title length: {len(title)} characters")
 
         if not video_path.exists():
             raise FileNotFoundError(f"Video file not found: {video_path}")
@@ -114,7 +131,7 @@ class YouTubeUploader:
         body = {
             'snippet': {
                 'title': title,
-                'description': description,
+                'description': description or '',  # Ensure description is not None
                 'tags': tags or [],
                 'categoryId': category_id
             },
@@ -122,6 +139,11 @@ class YouTubeUploader:
                 'privacyStatus': 'private'  # Start as private, user can change later
             }
         }
+        
+        # Debug: Log the actual body being sent
+        logger.debug(f"Request body title: '{body['snippet']['title']}'")
+        logger.debug(f"Request body title type: {type(body['snippet']['title'])}")
+        logger.debug(f"Request body title length: {len(body['snippet']['title']) if body['snippet']['title'] else 0}")
 
         try:
             # Create media upload object
