@@ -430,6 +430,16 @@ class ArchiveScraper:
             return []
 
         logger.info(f"Found {len(audio_files)} audio files, trying to match with {len(tracks)} tracks")
+        
+        # Log all audio files for debugging
+        logger.info("Audio files found:")
+        for i, af in enumerate(audio_files):
+            logger.info(f"  [{i}] {af['filename']}")
+        
+        # Log all tracks for debugging
+        logger.info("Tracks extracted:")
+        for track in tracks:
+            logger.info(f"  Track {track['number']}: '{track['name']}'")
 
         # Try to match tracks to audio files
         track_audio = []
@@ -493,7 +503,7 @@ class ArchiveScraper:
                     pattern_re = re.compile(r'(^|[^0-9])' + re.escape(pattern) + r'([^0-9]|\.|$)', re.IGNORECASE)
                     if pattern_re.search(filename.lower()):
                         matched = True
-                        logger.debug(f"Matched specific pattern '{pattern}' in '{filename}' for track {track_num}")
+                                    logger.debug(f"Matched specific pattern '{pattern}' in '{filename}' for track {track_num} '{track_name}'")
                         break
                 
                 # If no specific pattern matched, try generic numeric patterns (but be more careful)
@@ -516,7 +526,7 @@ class ArchiveScraper:
                                 date_pattern = re.compile(r'\d{4}[-\/]\d{1,2}[-\/]' + re.escape(pattern))
                                 if not date_pattern.search(filename.lower()):
                                     matched = True
-                                    logger.debug(f"Matched generic pattern '{pattern}' in '{filename}' for track {track_num}")
+                                    logger.debug(f"Matched generic pattern '{pattern}' in '{filename}' for track {track_num} '{track_name}'")
                                     break
                             else:
                                 matched = True
@@ -526,7 +536,7 @@ class ArchiveScraper:
                 if matched:
                     matched_file = audio_file
                     used_audio_files.add(i)
-                    logger.debug(f"Matched track {track_num} '{track_name}' to {audio_file['filename']} (pattern match)")
+                    logger.info(f"✓ Matched track {track_num} '{track_name}' to audio file [{i}] {audio_file['filename']}")
                     break
 
             if matched_file:
@@ -536,9 +546,9 @@ class ArchiveScraper:
                     'url': matched_file['url'],
                     'filename': matched_file['filename']
                 })
-                logger.info(f"Matched track {track_num} '{track_name}' to {matched_file['filename']}")
             else:
-                logger.warning(f"Could not match track {track_num} '{track_name}' to any audio file")
+                logger.warning(f"✗ Could not match track {track_num} '{track_name}' to any audio file")
+                logger.warning(f"  Tried patterns: t{track_num_padded}, t{track_num_str}, {track_num_padded}, {track_num_str}")
 
         # If we have unmatched tracks but have audio files, try sequential matching
         if len(track_audio) < len(tracks) and len(audio_files) > len(track_audio):
