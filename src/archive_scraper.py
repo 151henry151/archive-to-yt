@@ -290,37 +290,136 @@ class ArchiveScraper:
 
         # Look for numbered track list patterns
         # Format: "01. Track Name" or "1. Track Name"
-        # Match until end of line or next track number
+        # Be more strict: track names should be reasonable length and not look like metadata
+        
+        # First, try to find a section that looks like a track list
+        # Look for patterns like "Set I", "Set II", "Disc 1", or just a sequence of numbered items
+        track_list_section = description_clean
+        
+        # Try to find the track list section (between common markers)
+        # Look for a sequence of at least 5 consecutive numbered items (01. Track, 02. Track, etc.)
+        consecutive_tracks_pattern = r'(\d{1,2}\.\s+[^\n]+(?:\n\d{1,2}\.\s+[^\n]+){4,})'
+        consecutive_match = re.search(consecutive_tracks_pattern, description_clean, re.MULTILINE)
+        if consecutive_match:
+            track_list_section = consecutive_match.group(1)
+            logger.debug(f"Found track list section: {len(track_list_section)} chars with consecutive numbered items")
+        else:
+            # Fallback: look for section markers
+            section_patterns = [
+                r'(?:Set\s+[IVX]+|Disc\s+\d+|Track\s+List|Tracks?)[:\s]*\n\n?(.*?)(?:\n\n|\n\*|Taper\s+notes|Transfer\s+notes|Recorded\s+by|$)',  # Track list section
+            ]
+            
+            for section_pattern in section_patterns:
+                section_match = re.search(section_pattern, description_clean, re.IGNORECASE | re.DOTALL)
+                if section_match:
+                    track_list_section = section_match.group(1) if section_match.groups() else section_match.group(0)
+                    logger.debug(f"Found track list section using marker pattern")
+                    break
+        
+        # Look for numbered track list patterns in the section
+        # Be more strict: track numbers should be followed by track names, not dates or locations
         track_patterns = [
-            r'(\d{2})\.\s*([^\n]+?)(?=\s*\d{2}\.\s*|\s*\d{1}\.\s*|$|\n\n)',  # Two-digit format: 01. Track (stop at next track or double newline)
-            r'(\d{1,2})\.\s*([^\n]+?)(?=\s*\d{1,2}\.\s*|$|\n\n)',  # One or two digit format
+            r'(\d{2})\.\s+([^\n]+?)(?=\s*\d{2}\.\s*|\s*\d{1}\.\s*|$|\n\n|\n\*|\nTaper|\nTransfer|\nRecorded)',  # Two-digit format
+            r'(\d{1,2})\.\s+([^\n]+?)(?=\s*\d{1,2}\.\s*|$|\n\n|\n\*|\nTaper|\nTransfer|\nRecorded)',  # One or two digit format
         ]
 
+        seen_track_numbers = set()  # Track numbers we've already added to avoid duplicates
+        
         for pattern in track_patterns:
-            matches = re.findall(pattern, description_clean, re.MULTILINE)
+            matches = re.findall(pattern, track_list_section, re.MULTILINE)
             if matches:
                 for number, name in matches:
                     # Pad single digits to two digits
                     track_num = number.zfill(2)
+                    
+                    # Skip if we've already seen this track number (avoid duplicates)
+                    if track_num in seen_track_numbers:
+                        continue
+                    
                     # Clean up track name: remove extra whitespace, HTML remnants
                     clean_name = re.sub(r'\s+', ' ', name.strip())
                     # Remove any remaining HTML entities
                     clean_name = clean_name.replace('&nbsp;', ' ').strip()
                     
-                    # Only add if we have a valid track name (not empty, not just whitespace)
-                    # And make sure it's not capturing multiple tracks
-                    if clean_name and len(clean_name) > 0 and len(clean_name) < 200:  # Reasonable length limit
+                    # Filter out invalid track names:
+                    # Check invalid patterns - some need case-sensitive matching
+                    is_invalid = False
+                    
+                    # Case-insensitive patterns
+                    case_insensitive_patterns = [
+                        r'^[A-Z][a-z]+\s+[A-Z][a-z]+,\s+[A-Z]{2}',  # Location patterns (Cropseyville NY, Kansasville WI)
+                        r'^[A-Z][a-z]+\s+[A-Z][a-z]+\'s',  # Possessive patterns (Martha Mary Lane's)
+                        r'^[A-Z][a-z]+\s+by:',  # "Recorded by:", "Transfer by:"
+                        r'^[A-Z][a-z]+\s+notes:',  # "Taper notes:", "Transfer notes:"
+                        r'^[A-Z][a-z]+\s+[A-Z][a-z]+:',  # Other metadata patterns
+                        r'^[A-Z][a-z]+\.flac\d+',  # Filename patterns (Romp2010-04-02.flac16)
+                    ]
+                    
+                    for pattern in case_insensitive_patterns:
+                        if re.match(pattern, clean_name, re.IGNORECASE):
+                            is_invalid = True
+                            logger.debug(f"Skipping invalid track name: '{clean_name}' (matches pattern: {pattern})")
+                            break
+                    
+                    # Case-sensitive patterns (to avoid false matches)
+                    if not is_invalid:
+                        case_sensitive_patterns = [
+                            r'^\d{4}[-/]\d',  # Date patterns (2010-04-02, 6/25/11)
+                            r'^\d{1,2}[-/]\d',  # Date patterns (04/02, 6/25, May 01)
+                            r'^[A-Z][a-z]+\s+\d{1,2},\s+\d{4}',  # "May 01, 2010"
+                            r'^[()]+$',  # Just parentheses
+                            r'^[A-Z]{2,}\s*$',  # Just uppercase letters ONLY (no lowercase) - case sensitive
+                        ]
+                        
+                        for pattern in case_sensitive_patterns:
+                            if re.match(pattern, clean_name):  # No IGNORECASE flag
+                                is_invalid = True
+                                logger.debug(f"Skipping invalid track name: '{clean_name}' (matches pattern: {pattern})")
+                                break
+                    
+                    # Additional checks
+                    if len(clean_name) < 2:
+                        is_invalid = True
+                    if len(clean_name) > 200:
+                        is_invalid = True
+                    
+                    # Check if it looks like a filename pattern that should be handled differently
+                    # Patterns like "Lane Family.2011-06-25.t01" or "Romp2010-04-02.T01" or "Lane Family.2011-06-"
+                    if re.search(r'\.t\d+$', clean_name) or re.search(r'\.T\d+$', clean_name) or re.search(r'\.\d{4}-\d{2}-$', clean_name):
+                        # This is a filename pattern - extract track number and use generic name
+                        track_match = re.search(r'[tT](\d+)$', clean_name)
+                        if track_match:
+                            # Use a generic name since the actual track name isn't in the description
+                            clean_name = f"Track {track_match.group(1)}"
+                            # Also update track_num to match the filename's track number
+                            track_num = track_match.group(1).zfill(2)
+                        else:
+                            # Pattern like "Lane Family.2011-06-" - extract from track_num we already have
+                            clean_name = f"Track {track_num}"
+                            is_invalid = False  # Override invalid flag since we're fixing it
+                    
+                    # Check if name contains a date pattern (like "May 01, 2010")
+                    if re.search(r'[A-Z][a-z]+\s+\d{1,2}[,\s]+\d{4}', clean_name):
+                        is_invalid = True
+                    
+                    if not is_invalid and clean_name:
                         tracks.append({
                             'number': track_num,
                             'name': clean_name
                         })
+                        seen_track_numbers.add(track_num)
                 
-                # Only use matches if we got reasonable number of tracks (more than 1)
-                if len(tracks) > 1:
+                # Only use matches if we got reasonable number of tracks (more than 1, less than 100)
+                # And check for duplicates - if we have duplicate track numbers, something is wrong
+                unique_track_nums = set(t['number'] for t in tracks)
+                if len(tracks) > 1 and len(tracks) < 100 and len(unique_track_nums) == len(tracks):
                     logger.debug(f"Extracted {len(tracks)} tracks from description")
                     break  # Use first pattern that finds matches
                 else:
+                    if len(unique_track_nums) != len(tracks):
+                        logger.warning(f"Found duplicate track numbers, resetting extraction")
                     tracks = []  # Reset if we didn't get good matches
+                    seen_track_numbers = set()
 
         # Log first few tracks for debugging
         if tracks:
@@ -431,6 +530,7 @@ class ArchiveScraper:
     def _extract_tracks_from_files(self, files: List[Dict]) -> List[Dict[str, str]]:
         """
         Try to infer tracks from audio file names.
+        Prefers FLAC over MP3 to avoid duplicates.
 
         Returns:
             List of dictionaries with 'number' and 'name' keys
@@ -438,31 +538,85 @@ class ArchiveScraper:
         tracks = []
         audio_extensions = ['.flac', '.mp3', '.wav', '.m4a', '.ogg', '.oggvorbis']
         
-        # Filter audio files and sort them
-        audio_files = [
-            f for f in files 
-            if any(f.get('name', '').lower().endswith(ext) for ext in audio_extensions)
-        ]
+        # Filter audio files, prefer FLAC over MP3
+        audio_files_dict = {}  # key: track identifier, value: file info
+        file_priority = {'.flac': 1, '.wav': 2, '.m4a': 3, '.ogg': 4, '.oggvorbis': 4, '.mp3': 5}
         
-        # Sort by filename to maintain order
-        audio_files.sort(key=lambda x: x.get('name', '').lower())
+        for f in files:
+            filename = f.get('name', '')
+            if not any(filename.lower().endswith(ext) for ext in audio_extensions):
+                continue
+            
+            # Extract track identifier - look for patterns like T01, t01, d1t01, etc.
+            track_key = None
+            track_num_from_file = None
+            
+            # Try disc-based pattern first (d1t01, d2t01)
+            disc_track_match = re.search(r'[dD](\d+)[tT](\d+)', filename)
+            if disc_track_match:
+                track_key = f"d{disc_track_match.group(1)}t{disc_track_match.group(2)}"
+                track_num_from_file = disc_track_match.group(2)
+            else:
+                # Try T01, t01 pattern (uppercase or lowercase T)
+                track_match = re.search(r'[tT](\d+)', filename)
+                if track_match:
+                    track_key = f"t{track_match.group(1)}"
+                    track_num_from_file = track_match.group(1)
+            
+            if track_key:
+                # Get file extension priority
+                ext_priority = 999
+                for ext, priority in file_priority.items():
+                    if filename.lower().endswith(ext):
+                        ext_priority = priority
+                        break
+                
+                # Prefer higher quality (lower priority number)
+                if track_key not in audio_files_dict or ext_priority < audio_files_dict[track_key]['priority']:
+                    audio_files_dict[track_key] = {
+                        'filename': filename,
+                        'track_num': track_num_from_file,
+                        'priority': ext_priority
+                    }
         
-        for i, audio_file in enumerate(audio_files, 1):
-            filename = audio_file.get('name', '')
-            # Try to extract track number from filename
-            track_num_match = re.search(r'(\d{1,2})', filename)
-            if track_num_match:
-                track_num = track_num_match.group(1).zfill(2)
+        # Convert to list and sort by track number
+        audio_files_list = []
+        for track_key, file_info in audio_files_dict.items():
+            audio_files_list.append({
+                'filename': file_info['filename'],
+                'track_num': file_info['track_num']
+            })
+        
+        # Sort by track number (extract numeric part for sorting)
+        def sort_key(x):
+            track_num = x['track_num']
+            if track_num:
+                return int(track_num)
+            return 999
+        
+        audio_files_list.sort(key=sort_key)
+        
+        for i, audio_file in enumerate(audio_files_list, 1):
+            filename = audio_file['filename']
+            track_num_from_file = audio_file['track_num']
+            
+            # Use track number from filename if available, otherwise use index
+            if track_num_from_file:
+                track_num = track_num_from_file.zfill(2)
             else:
                 track_num = f"{i:02d}"
             
-            # Extract track name from filename (remove extension and common prefixes)
-            track_name = re.sub(r'\.(flac|mp3|wav|m4a|ogg|oggvorbis)$', '', filename, flags=re.IGNORECASE)
+            # Extract track name from filename (use basename only)
+            track_name = os.path.basename(filename)
+            track_name = re.sub(r'\.(flac|mp3|wav|m4a|ogg|oggvorbis)$', '', track_name, flags=re.IGNORECASE)
+            # Remove track number patterns
+            track_name = re.sub(r'[dD]\d+[tT]\d+', '', track_name)
+            track_name = re.sub(r'[tT]\d+', '', track_name)
             track_name = re.sub(r'^(track[-_\s]*\d+[-_\s]*)', '', track_name, flags=re.IGNORECASE)
-            track_name = track_name.strip()
+            track_name = re.sub(r'[-_\s]+', ' ', track_name).strip()
             
-            if not track_name:
-                track_name = f"Track {i}"
+            if not track_name or len(track_name) < 2:
+                track_name = f"Track {track_num_from_file if track_num_from_file else i}"
             
             tracks.append({
                 'number': track_num,
