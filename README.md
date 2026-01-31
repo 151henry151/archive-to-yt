@@ -138,12 +138,16 @@ python upload.py https://archive.org/details/lf2007-11-21.a
 
 This will:
 1. Extract metadata and track information
-2. Check for existing videos on YouTube (prevents duplicates)
-3. Download audio tracks (only for videos that don't exist)
-4. Create videos with the background image (only for videos that don't exist)
-5. Upload each video to YouTube (only videos that don't already exist)
-6. Create a playlist with all tracks
-7. Offer to make videos and playlist public after review
+2. **Show a preview** of what will be uploaded (tracks, titles, durations, playlist info)
+3. **Ask for confirmation** before proceeding
+4. Check for existing videos on YouTube (prevents duplicates)
+5. Download audio tracks (only for videos that don't exist)
+6. Create videos with the background image (only for videos that don't exist)
+7. Upload each video to YouTube (only videos that don't already exist)
+8. Create a playlist with all tracks
+9. Offer to make videos and playlist public after review
+
+**Note**: The preview step allows you to review all track information, titles, durations, and playlist details before any files are downloaded or uploaded. This helps ensure everything looks correct before proceeding.
 
 ## How It Works
 

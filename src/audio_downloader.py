@@ -225,6 +225,46 @@ class AudioDownloader:
             logger.warning(f"Error validating audio file {audio_path.name}: {e}")
             return False
 
+    def get_audio_duration_from_url(self, url: str) -> Optional[float]:
+        """
+        Get duration of audio file from URL using ffprobe (without downloading).
+        
+        Args:
+            url: URL of audio file
+            
+        Returns:
+            Duration in seconds, or None if unable to determine
+        """
+        try:
+            cmd = [
+                'ffprobe',
+                '-v', 'error',
+                '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                url
+            ]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                duration_str = result.stdout.strip()
+                if duration_str:
+                    return float(duration_str)
+            logger.debug(f"Could not get duration from URL: {url}")
+            return None
+        except subprocess.TimeoutExpired:
+            logger.debug(f"ffprobe timed out getting duration from URL: {url}")
+            return None
+        except FileNotFoundError:
+            logger.debug("ffprobe not found, cannot get duration from URL")
+            return None
+        except Exception as e:
+            logger.debug(f"Error getting duration from URL {url}: {e}")
+            return None
+
     def find_existing_files(self, identifier: str) -> List[Path]:
         """
         Find existing audio files for a given identifier (resume capability).

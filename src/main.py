@@ -61,6 +61,113 @@ class ArchiveToYouTube:
 
         logger.info("Archive to YouTube uploader initialized")
 
+    def _format_duration(self, seconds: Optional[float]) -> str:
+        """Format duration in seconds as MM:SS or HH:MM:SS."""
+        if seconds is None:
+            return "Unknown"
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        if hours > 0:
+            return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+        else:
+            return f"{minutes:02d}:{secs:02d}"
+
+    def _preview_upload(self, metadata: dict, track_audio: List[dict]) -> None:
+        """
+        Display a preview of what would be uploaded to YouTube.
+        
+        Args:
+            metadata: Extracted metadata from archive.org
+            track_audio: List of track information with audio URLs
+        """
+        logger.info(f"\n{'='*80}")
+        logger.info("PREVIEW: What will be uploaded to YouTube")
+        logger.info(f"{'='*80}\n")
+        
+        # Show collection info
+        logger.info("Collection Information:")
+        logger.info(f"  Title: {metadata.get('title', 'Unknown')}")
+        logger.info(f"  Performer: {metadata.get('performer', 'Unknown')}")
+        logger.info(f"  Venue: {metadata.get('venue', 'Unknown')}")
+        logger.info(f"  Date: {metadata.get('date', 'Unknown')}")
+        logger.info(f"  Archive.org URL: {metadata.get('url', 'Unknown')}")
+        logger.info(f"  Identifier: {metadata.get('identifier', 'Unknown')}\n")
+        
+        # Show playlist info
+        playlist_title = self.metadata_formatter.format_playlist_title(metadata)
+        tracks = metadata.get('tracks', [])
+        playlist_description = self.metadata_formatter.format_playlist_description(metadata, tracks)
+        
+        logger.info("Playlist Information:")
+        logger.info(f"  Title: {playlist_title}")
+        logger.info(f"  Description length: {len(playlist_description)} characters")
+        logger.info(f"  Number of tracks: {len(track_audio)}\n")
+        
+        # Show each track
+        logger.info("Tracks to be uploaded:")
+        logger.info(f"{'='*80}")
+        total_duration = 0.0
+        
+        for i, track_info in enumerate(track_audio, 1):
+            track_num = track_info['number']
+            track_name = track_info['name']
+            audio_url = track_info['url']
+            audio_filename = track_info.get('filename', 'Unknown')
+            
+            # Clean track name for title formatting
+            track_info_clean = track_info.copy()
+            import re
+            track_name_clean = str(track_info.get('name', 'Unknown Track')).strip()
+            track_name_clean = re.sub(r'<[^>]+>', '', track_name_clean)
+            track_name_clean = track_name_clean.replace('&gt;', '>').replace('&lt;', '<').replace('&amp;', '&')
+            track_name_clean = re.sub(r'\s+', ' ', track_name_clean).strip()
+            if len(track_name_clean) > 100 or '\n' in track_name_clean:
+                track_name_clean = track_name_clean.split('\n')[0].strip()
+            if not track_name_clean or len(track_name_clean) == 0:
+                track_name_clean = f"Track {track_num}"
+            track_info_clean['name'] = track_name_clean
+            
+            # Format video title
+            video_title = self.metadata_formatter.format_video_title(
+                track_info_clean,
+                metadata
+            )
+            if not video_title or not video_title.strip():
+                video_title = f"Track {track_num} - {track_name_clean}"
+            
+            # Get audio duration
+            logger.info(f"  Getting duration for track {i}/{len(track_audio)}...")
+            duration = self.audio_downloader.get_audio_duration_from_url(audio_url)
+            if duration:
+                total_duration += duration
+            
+            # Format description preview
+            video_description = self.metadata_formatter.format_track_description(
+                track_info_clean,
+                metadata
+            )
+            description_preview = video_description[:200] + "..." if len(video_description) > 200 else video_description
+            description_lines = description_preview.split('\n')[:3]  # Show first 3 lines max
+            
+            logger.info(f"\n  Track {i}: {track_num}. {track_name}")
+            logger.info(f"    Video Title: {video_title}")
+            logger.info(f"    Audio File: {audio_filename}")
+            logger.info(f"    Duration: {self._format_duration(duration)}")
+            logger.info(f"    Description ({len(video_description)} chars):")
+            for line in description_lines:
+                logger.info(f"      {line}")
+            if len(video_description) > 200:
+                logger.info(f"      ... (truncated, {len(video_description) - 200} more characters)")
+            logger.info("")
+        
+        logger.info(f"{'='*80}")
+        logger.info(f"Summary:")
+        logger.info(f"  Total tracks: {len(track_audio)}")
+        logger.info(f"  Total duration: {self._format_duration(total_duration)}")
+        logger.info(f"  Playlist: {playlist_title}")
+        logger.info(f"{'='*80}\n")
+
     def process_archive_url(self, url: str) -> None:
         """
         Process an archive.org URL and upload to YouTube.
@@ -94,6 +201,22 @@ class ArchiveToYouTube:
             # Get identifier for unique filenames (resume capability)
             identifier = metadata.get('identifier', 'unknown')
             logger.info(f"Using identifier '{identifier}' for file naming (resume capability enabled)")
+            
+            # DRY-RUN PREVIEW: Show what will be uploaded (before any downloads)
+            logger.info(f"\n{'='*80}")
+            logger.info("DRY-RUN PREVIEW")
+            logger.info(f"{'='*80}")
+            self._preview_upload(metadata, track_audio)
+            
+            # Ask for user confirmation
+            logger.info("Please review the preview above.")
+            response = input("\nProceed with download, video creation, and upload? (yes/no): ").strip().lower()
+            
+            if response not in ['yes', 'y']:
+                logger.info("Aborted by user. No files downloaded or uploaded.")
+                return
+            
+            logger.info("\nProceeding with download and upload...\n")
             
             # Check for existing files (resume capability)
             existing_audio = self.audio_downloader.find_existing_files(identifier)
