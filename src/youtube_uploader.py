@@ -547,6 +547,27 @@ class YouTubeUploader:
             logger.error(f"Error updating playlist {playlist_id} privacy: {e}")
             return False
 
+    def delete_video(self, video_id: str) -> bool:
+        """
+        Delete a video from YouTube.
+        
+        Args:
+            video_id: YouTube video ID to delete
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            self.youtube.videos().delete(id=video_id).execute()
+            logger.info(f"Deleted video {video_id}")
+            return True
+        except HttpError as e:
+            logger.error(f"Failed to delete video {video_id}: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Error deleting video {video_id}: {e}")
+            return False
+
     def make_videos_public(self, video_ids: List[str]) -> int:
         """
         Make multiple videos public.

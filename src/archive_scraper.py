@@ -448,18 +448,85 @@ class ArchiveScraper:
                 filename = audio_file['filename'].lower()
                 # Check if track number is in filename (various formats)
                 track_num_str = track_num.lstrip('0')  # Remove leading zeros
-                if (track_num in filename or 
-                    track_num_str in filename or 
-                    f"track{track_num}" in filename or
-                    f"track{track_num_str}" in filename or
-                    f"track {track_num}" in filename or
-                    f"track {track_num_str}" in filename or
-                    f"track-{track_num}" in filename or
-                    f"track-{track_num_str}" in filename or
-                    f"track_{track_num}" in filename or
-                    f"track_{track_num_str}" in filename):
+                track_num_padded = track_num.zfill(2)  # Ensure two digits
+                
+                # Common patterns: t01, t02, track01, track-01, track_01, 01., etc.
+                # Also check for patterns like "t01" (common in archive.org: Romp2007-11-21t01.flac)
+                patterns = [
+                    f"t{track_num_padded}",  # t01, t02 (most common in archive.org)
+                    f"t{track_num_str}",     # t1, t2
+                    f"t{track_num}",         # t01, t02 (if already padded)
+                    track_num_padded,        # 01, 02
+                    track_num_str,           # 1, 2
+                    track_num,               # 01, 02 (original)
+                    f"track{track_num_padded}",
+                    f"track{track_num_str}",
+                    f"track {track_num_padded}",
+                    f"track {track_num_str}",
+                    f"track-{track_num_padded}",
+                    f"track-{track_num_str}",
+                    f"track_{track_num_padded}",
+                    f"track_{track_num_str}",
+                    f"{track_num_padded}.",  # 01. at start or after separator
+                    f"{track_num_str}.",
+                ]
+                
+                # Check if any pattern matches in the filename
+                # Prioritize more specific patterns (t01, t02) over generic numeric patterns
+                matched = False
+                import re
+                
+                # First try specific patterns (t01, track01, etc.) - these are more reliable
+                specific_patterns = [
+                    f"t{track_num_padded}",  # t01, t02 (most common in archive.org)
+                    f"t{track_num_str}",     # t1, t2
+                    f"track{track_num_padded}",
+                    f"track{track_num_str}",
+                    f"track-{track_num_padded}",
+                    f"track-{track_num_str}",
+                    f"track_{track_num_padded}",
+                    f"track_{track_num_str}",
+                ]
+                
+                for pattern in specific_patterns:
+                    # For specific patterns, check they're not part of a larger number
+                    pattern_re = re.compile(r'(^|[^0-9])' + re.escape(pattern) + r'([^0-9]|\.|$)', re.IGNORECASE)
+                    if pattern_re.search(filename.lower()):
+                        matched = True
+                        logger.debug(f"Matched specific pattern '{pattern}' in '{filename}' for track {track_num}")
+                        break
+                
+                # If no specific pattern matched, try generic numeric patterns (but be more careful)
+                if not matched:
+                    generic_patterns = [
+                        f"{track_num_padded}.",  # 01. at start or after separator
+                        f"{track_num_str}.",
+                        track_num_padded,        # 01, 02 (check boundaries carefully)
+                        track_num_str,           # 1, 2
+                    ]
+                    
+                    for pattern in generic_patterns:
+                        # For generic patterns, be very strict about word boundaries
+                        pattern_re = re.compile(r'(^|[^0-9])' + re.escape(pattern) + r'([^0-9]|\.|$)', re.IGNORECASE)
+                        if pattern_re.search(filename.lower()):
+                            # Double-check it's not matching part of a date (e.g., 2007-11-21)
+                            # If pattern is just digits, make sure it's not in the middle of a date string
+                            if pattern.isdigit():
+                                # Check that it's not part of a date pattern like 2007-11-21
+                                date_pattern = re.compile(r'\d{4}[-\/]\d{1,2}[-\/]' + re.escape(pattern))
+                                if not date_pattern.search(filename.lower()):
+                                    matched = True
+                                    logger.debug(f"Matched generic pattern '{pattern}' in '{filename}' for track {track_num}")
+                                    break
+                            else:
+                                matched = True
+                                logger.debug(f"Matched generic pattern '{pattern}' in '{filename}' for track {track_num}")
+                                break
+                
+                if matched:
                     matched_file = audio_file
                     used_audio_files.add(i)
+                    logger.debug(f"Matched track {track_num} '{track_name}' to {audio_file['filename']} (pattern match)")
                     break
 
             if matched_file:
@@ -469,25 +536,38 @@ class ArchiveScraper:
                     'url': matched_file['url'],
                     'filename': matched_file['filename']
                 })
-                logger.debug(f"Matched track {track_num} to {matched_file['filename']}")
+                logger.info(f"Matched track {track_num} '{track_name}' to {matched_file['filename']}")
+            else:
+                logger.warning(f"Could not match track {track_num} '{track_name}' to any audio file")
 
-        # If we have unmatched tracks but have audio files, use them in order
+        # If we have unmatched tracks but have audio files, try sequential matching
         if len(track_audio) < len(tracks) and len(audio_files) > len(track_audio):
-            logger.info(f"Some tracks couldn't be matched, using audio files in order")
+            logger.warning(f"Some tracks couldn't be matched by pattern, trying sequential matching")
+            # Sort unused audio files by filename to maintain order
+            unused_files = [(i, f) for i, f in enumerate(audio_files) if i not in used_audio_files]
+            unused_files.sort(key=lambda x: x[1]['filename'].lower())
+            
             for track in tracks[len(track_audio):]:
-                # Find next unused audio file
-                for i, audio_file in enumerate(audio_files):
-                    if i not in used_audio_files:
-                        track_audio.append({
-                            'number': track['number'],
-                            'name': track['name'],
-                            'url': audio_file['url'],
-                            'filename': audio_file['filename']
-                        })
-                        used_audio_files.add(i)
-                        logger.debug(f"Assigned track {track['number']} to {audio_file['filename']} (by order)")
-                        break
+                if unused_files:
+                    i, audio_file = unused_files.pop(0)
+                    track_audio.append({
+                        'number': track['number'],
+                        'name': track['name'],
+                        'url': audio_file['url'],
+                        'filename': audio_file['filename']
+                    })
+                    used_audio_files.add(i)
+                    logger.warning(f"Sequentially assigned track {track['number']} '{track['name']}' to {audio_file['filename']} (may be incorrect!)")
 
-        # If we have more audio files than tracks, that's okay - we'll use what we matched
+        # Validate that we have the right number of matches
+        if len(track_audio) != len(tracks):
+            logger.error(f"Mismatch: {len(track_audio)} track-audio matches for {len(tracks)} tracks")
+            logger.error("This may cause incorrect track-to-audio matching!")
+        
+        # Log the final matches for verification
+        logger.info(f"Final track-to-audio matches:")
+        for ta in track_audio:
+            logger.info(f"  Track {ta['number']}: '{ta['name']}' -> {ta['filename']}")
+        
         logger.info(f"Matched {len(track_audio)} tracks to audio files")
         return track_audio

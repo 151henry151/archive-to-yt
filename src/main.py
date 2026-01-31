@@ -220,13 +220,53 @@ class ArchiveToYouTube:
                         video_id = existing_videos.get(video_title)
                         
                         if video_id:
-                            logger.info(f"Video already exists on YouTube: {video_title}")
-                            logger.info(f"  Video ID: {video_id}")
-                            logger.info(f"  URL: https://www.youtube.com/watch?v={video_id}")
-                            logger.info("Skipping download, video creation, and upload for this track")
-                            uploaded_video_ids.append(video_id)
-                            logger.info(f"✓ Successfully processed track {i} (using existing video)")
-                            continue
+                            # Verify the video title matches what we expect
+                            # Get the actual video title from YouTube to verify
+                            try:
+                                video_response = self.youtube_uploader.youtube.videos().list(
+                                    part='snippet',
+                                    id=video_id
+                                ).execute()
+                                
+                                if video_response.get('items'):
+                                    actual_title = video_response['items'][0]['snippet']['title']
+                                    # Normalize for comparison
+                                    normalized_expected = ' '.join(video_title.lower().split())
+                                    normalized_actual = ' '.join(actual_title.lower().split())
+                                    
+                                    # Check if titles match
+                                    if (normalized_expected == normalized_actual or 
+                                        normalized_expected in normalized_actual or 
+                                        normalized_actual in normalized_expected):
+                                        logger.info(f"Video already exists on YouTube: {video_title}")
+                                        logger.info(f"  Video ID: {video_id}")
+                                        logger.info(f"  URL: https://www.youtube.com/watch?v={video_id}")
+                                        logger.info("Skipping download, video creation, and upload for this track")
+                                        uploaded_video_ids.append(video_id)
+                                        logger.info(f"✓ Successfully processed track {i} (using existing video)")
+                                        continue
+                                    else:
+                                        logger.warning(f"Existing video has incorrect title!")
+                                        logger.warning(f"  Expected: '{video_title}'")
+                                        logger.warning(f"  Actual: '{actual_title}'")
+                                        logger.warning(f"  Video ID: {video_id}")
+                                        logger.warning("Will delete incorrect video and re-upload with correct track")
+                                        
+                                        # Delete the incorrect video
+                                        if self.youtube_uploader.delete_video(video_id):
+                                            logger.info(f"Deleted incorrect video {video_id}, will re-upload")
+                                            # Continue to upload process below
+                                        else:
+                                            logger.error(f"Failed to delete incorrect video {video_id}")
+                                            logger.error("Skipping this track - please delete manually and re-run")
+                                            continue
+                                else:
+                                    logger.warning(f"Video {video_id} not found, will upload new one")
+                                    # Continue to upload process below
+                            except Exception as e:
+                                logger.warning(f"Could not verify existing video {video_id}: {e}")
+                                logger.warning("Will proceed with upload (may create duplicate)")
+                                # Continue to upload process below
                         
                         # Download audio (with resume capability)
                         logger.info(f"Downloading audio file...")
