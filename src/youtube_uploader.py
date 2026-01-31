@@ -345,6 +345,89 @@ class YouTubeUploader:
             logger.warning("Will proceed with uploading (may create duplicates)")
             return found_videos
 
+    def get_playlist_items(self, playlist_id: str) -> List[Dict[str, str]]:
+        """
+        Get all videos in a playlist with their positions and titles.
+        
+        Args:
+            playlist_id: YouTube playlist ID
+            
+        Returns:
+            List of dictionaries with video_id, position, and title
+        """
+        items = []
+        try:
+            next_page_token = None
+            while True:
+                request = self.youtube.playlistItems().list(
+                    part='snippet,contentDetails',
+                    playlistId=playlist_id,
+                    maxResults=50
+                )
+                if next_page_token:
+                    request = request.execute()
+                else:
+                    response = request.execute()
+                
+                for item in response.get('items', []):
+                    video_id = item['contentDetails']['videoId']
+                    position = item['snippet'].get('position', 0)
+                    title = item['snippet'].get('title', '')
+                    items.append({
+                        'video_id': video_id,
+                        'position': position,
+                        'title': title
+                    })
+                
+                next_page_token = response.get('nextPageToken')
+                if not next_page_token:
+                    break
+            
+            # Sort by position
+            items.sort(key=lambda x: x['position'])
+            return items
+        except HttpError as e:
+            logger.error(f"Error getting playlist items: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Error getting playlist items: {e}")
+            return []
+
+    def insert_video_to_playlist(self, playlist_id: str, video_id: str, position: int) -> bool:
+        """
+        Insert a video into a playlist at a specific position.
+        
+        Args:
+            playlist_id: YouTube playlist ID
+            video_id: YouTube video ID to insert
+            position: Position in playlist (0-indexed)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            self.youtube.playlistItems().insert(
+                part='snippet',
+                body={
+                    'snippet': {
+                        'playlistId': playlist_id,
+                        'resourceId': {
+                            'kind': 'youtube#video',
+                            'videoId': video_id
+                        },
+                        'position': position
+                    }
+                }
+            ).execute()
+            logger.info(f"Inserted video {video_id} at position {position} in playlist")
+            return True
+        except HttpError as e:
+            logger.error(f"Failed to insert video at position {position}: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Error inserting video at position {position}: {e}")
+            return False
+
     def find_existing_playlist(self, expected_title: str, archive_url: str = '') -> Optional[str]:
         """
         Search for an existing playlist on YouTube that matches the expected title.

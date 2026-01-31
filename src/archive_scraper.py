@@ -534,10 +534,43 @@ class ArchiveScraper:
                                 break
                 
                 if matched:
-                    matched_file = audio_file
-                    used_audio_files.add(i)
-                    logger.info(f"✓ Matched track {track_num} '{track_name}' to audio file [{i}] {audio_file['filename']}")
-                    break
+                    # Double-check: verify the matched file actually contains the track number
+                    # This prevents false matches (e.g., track 3 matching to track 1's file)
+                    filename_lower = filename.lower()
+                    track_num_str = track_num.lstrip('0') or '0'  # Handle '00' case
+                    track_num_padded = track_num.zfill(2)
+                    
+                    # Verify the match is correct by checking for track number patterns
+                    verification_patterns = [
+                        f"t{track_num_padded}",  # t03
+                        f"t{track_num_str}",     # t3
+                        f"track{track_num_padded}",
+                        f"track{track_num_str}",
+                        f"track-{track_num_padded}",
+                        f"track-{track_num_str}",
+                        f"track_{track_num_padded}",
+                        f"track_{track_num_str}",
+                        f"{track_num_padded}.",  # 03.
+                        f"{track_num_str}.",      # 3.
+                    ]
+                    
+                    verified = False
+                    for pattern in verification_patterns:
+                        pattern_re = re.compile(r'(^|[^0-9])' + re.escape(pattern) + r'([^0-9]|\.|$)', re.IGNORECASE)
+                        if pattern_re.search(filename_lower):
+                            verified = True
+                            break
+                    
+                    if verified:
+                        matched_file = audio_file
+                        used_audio_files.add(i)
+                        logger.info(f"✓ Matched track {track_num} '{track_name}' to audio file [{i}] {audio_file['filename']}")
+                        logger.info(f"  Verified: audio file contains track number {track_num}")
+                        break
+                    else:
+                        logger.warning(f"  Match found but failed verification for track {track_num}")
+                        logger.warning(f"  Audio file '{audio_file['filename']}' doesn't clearly contain track number {track_num}")
+                        # Continue searching for a better match
 
             if matched_file:
                 track_audio.append({

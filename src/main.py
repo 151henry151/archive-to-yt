@@ -131,9 +131,10 @@ class ArchiveToYouTube:
             logger.info("Step 4: Checking for existing videos on YouTube...")
             logger.info(f"{'='*60}")
             
-            # Generate expected video titles for all tracks
+            # Generate expected video titles for all tracks and track their order
             expected_titles = []
-            for track_info in track_audio:
+            track_to_title_map = {}  # Map track index to expected title
+            for idx, track_info in enumerate(track_audio):
                 track_info_clean = track_info.copy()
                 track_name_clean = track_info_clean.get('name', 'Unknown Track')
                 # Sanitize track name
@@ -154,6 +155,7 @@ class ArchiveToYouTube:
                 if not video_title or not video_title.strip():
                     video_title = f"Track {track_info['number']} - {track_name_clean}"
                 expected_titles.append(video_title)
+                track_to_title_map[idx] = video_title
             
             # Search for existing videos
             existing_videos = self.youtube_uploader.find_existing_videos(
@@ -170,21 +172,27 @@ class ArchiveToYouTube:
             
             # Step 5: Process each track
             uploaded_video_ids = []
+            track_to_video_id_map = {}  # Map track index to video ID (for correct ordering)
             downloaded_audio_files = []
             created_video_files = []
             successfully_uploaded_audio = []  # Track which audio files were successfully uploaded
             successfully_uploaded_videos = []  # Track which videos were successfully uploaded
 
             try:
-                for i, track_info in enumerate(track_audio, 1):
+                for i, track_info in enumerate(track_audio):
+                    track_index = i  # 0-based index for mapping
                     track_num = track_info['number']
                     track_name = track_info['name']
                     audio_url = track_info['url']
                     audio_filename = track_info.get('filename', 'audio')
 
                     logger.info(f"\n{'='*60}")
-                    logger.info(f"Processing track {i}/{len(track_audio)}: {track_num}. {track_name}")
+                    logger.info(f"Processing track {i+1}/{len(track_audio)}: {track_num}. {track_name}")
                     logger.info(f"{'='*60}")
+                    logger.info(f"Track index: {track_index} (0-based)")
+                    logger.info(f"Expected audio file should contain track number: {track_num}")
+                    logger.info(f"Audio URL from match: {audio_url}")
+                    logger.info(f"Audio filename from match: {audio_filename}")
 
                     try:
                         # Format metadata first to get the video title for checking
@@ -242,8 +250,8 @@ class ArchiveToYouTube:
                                         logger.info(f"  Video ID: {video_id}")
                                         logger.info(f"  URL: https://www.youtube.com/watch?v={video_id}")
                                         logger.info("Skipping download, video creation, and upload for this track")
-                                        uploaded_video_ids.append(video_id)
-                                        logger.info(f"✓ Successfully processed track {i} (using existing video)")
+                                        track_to_video_id_map[track_index] = video_id
+                                        logger.info(f"✓ Successfully processed track {i+1} (using existing video)")
                                         continue
                                     else:
                                         logger.warning(f"Existing video has incorrect title!")
@@ -270,6 +278,9 @@ class ArchiveToYouTube:
                         
                         # Download audio (with resume capability)
                         logger.info(f"Downloading audio file...")
+                        logger.info(f"  Track {track_num}: '{track_name_clean}'")
+                        logger.info(f"  Audio URL: {audio_url}")
+                        logger.info(f"  Audio filename from match: {audio_filename}")
                         # Use identifier in filename for unique identification
                         audio_path = self.audio_downloader.download(
                             audio_url,
@@ -277,6 +288,7 @@ class ArchiveToYouTube:
                             skip_if_exists=True
                         )
                         downloaded_audio_files.append(audio_path)
+                        logger.info(f"  Downloaded to: {audio_path}")
 
                         # Create video (with resume capability)
                         logger.info(f"Creating video...")
@@ -309,6 +321,7 @@ class ArchiveToYouTube:
                             video_title,
                             video_description
                         )
+                        track_to_video_id_map[track_index] = video_id
                         uploaded_video_ids.append(video_id)
 
                         logger.info(f"✓ Successfully processed track {i}")
@@ -343,8 +356,57 @@ class ArchiveToYouTube:
                     logger.info(f"Found existing playlist: {existing_playlist_id}")
                     playlist_id = existing_playlist_id
                     
+                    # Get existing playlist items to detect gaps
+                    existing_playlist_items = self.youtube_uploader.get_playlist_items(playlist_id)
+                    logger.info(f"Playlist currently has {len(existing_playlist_items)} videos")
+                    
+                    # Build a map of expected titles to positions
+                    expected_titles_to_positions = {}
+                    for idx, track_info in enumerate(track_audio):
+                        track_info_clean = track_info.copy()
+                        track_name_clean = str(track_info.get('name', 'Unknown Track')).strip()
+                        import re
+                        track_name_clean = re.sub(r'<[^>]+>', '', track_name_clean)
+                        track_name_clean = track_name_clean.replace('&gt;', '>').replace('&lt;', '<').replace('&amp;', '&')
+                        track_name_clean = re.sub(r'\s+', ' ', track_name_clean).strip()
+                        if len(track_name_clean) > 100 or '\n' in track_name_clean:
+                            track_name_clean = track_name_clean.split('\n')[0].strip()
+                        if not track_name_clean or len(track_name_clean) == 0:
+                            track_name_clean = f"Track {track_info['number']}"
+                        track_info_clean['name'] = track_name_clean
+                        
+                        video_title = self.metadata_formatter.format_video_title(
+                            track_info_clean,
+                            metadata
+                        )
+                        if not video_title or not video_title.strip():
+                            video_title = f"Track {track_info['number']} - {track_name_clean}"
+                        expected_titles_to_positions[video_title] = idx
+                    
+                    # Check for gaps - find which videos are missing
+                    missing_positions = []
+                    for expected_title, expected_pos in expected_titles_to_positions.items():
+                        # Check if this video exists in playlist
+                        found = False
+                        for item in existing_playlist_items:
+                            actual_title = item['title']
+                            normalized_expected = ' '.join(expected_title.lower().split())
+                            normalized_actual = ' '.join(actual_title.lower().split())
+                            if (normalized_expected == normalized_actual or 
+                                normalized_expected in normalized_actual or 
+                                normalized_actual in normalized_expected):
+                                found = True
+                                break
+                        if not found:
+                            missing_positions.append((expected_pos, expected_title))
+                    
+                    if missing_positions:
+                        logger.info(f"Found {len(missing_positions)} missing videos in playlist:")
+                        for pos, title in missing_positions:
+                            logger.info(f"  Position {pos}: '{title}'")
+                    
                     # If all videos exist and playlist exists, we can skip straight to review
-                    if len(uploaded_video_ids) == 0 and len(existing_videos) == len(track_audio):
+                    if len(uploaded_video_ids) == 0 and len(existing_videos) == len(track_audio) and not missing_positions:
                         logger.info(f"\n{'='*60}")
                         logger.info("All videos and playlist already exist!")
                         logger.info(f"{'='*60}")
@@ -352,7 +414,7 @@ class ArchiveToYouTube:
                         logger.info(f"Found existing playlist")
                         logger.info("Skipping to review and publish step...")
                     else:
-                        logger.info("Using existing playlist, but some videos may be new")
+                        logger.info("Using existing playlist, some videos may be new or missing")
                 else:
                     # Create new playlist
                     if uploaded_video_ids:
@@ -365,6 +427,23 @@ class ArchiveToYouTube:
                             playlist_description,
                             uploaded_video_ids
                         )
+                        
+                        # If we have an existing playlist and new videos, add them
+                        if existing_playlist_id and uploaded_video_ids:
+                            logger.info(f"Adding {len(uploaded_video_ids)} new videos to existing playlist...")
+                            # Get current playlist items to find correct positions
+                            existing_items = self.youtube_uploader.get_playlist_items(existing_playlist_id)
+                            current_count = len(existing_items)
+                            
+                            for video_id in uploaded_video_ids:
+                                # Add to end of playlist
+                                self.youtube_uploader.insert_video_to_playlist(
+                                    existing_playlist_id,
+                                    video_id,
+                                    current_count
+                                )
+                                current_count += 1
+                            playlist_id = existing_playlist_id
                     else:
                         logger.error("No videos to add to playlist")
                         playlist_id = None
@@ -373,11 +452,49 @@ class ArchiveToYouTube:
                 if playlist_id:
                     playlist_url = f"https://www.youtube.com/playlist?list={playlist_id}"
                     
-                    # Collect all video IDs (both newly uploaded and existing)
-                    all_video_ids = uploaded_video_ids.copy()
-                    for title, video_id in existing_videos.items():
-                        if video_id not in all_video_ids:
-                            all_video_ids.append(video_id)
+                    # Collect all video IDs in correct track order (both newly uploaded and existing)
+                    all_video_ids = []
+                    for track_index in range(len(track_audio)):
+                        if track_index in track_to_video_id_map:
+                            # This track was processed (either uploaded or found existing)
+                            all_video_ids.append(track_to_video_id_map[track_index])
+                        else:
+                            # This track wasn't processed - check if it exists in existing_videos
+                            expected_title = track_to_title_map.get(track_index)
+                            if expected_title and expected_title in existing_videos:
+                                all_video_ids.append(existing_videos[expected_title])
+                    
+                    # Also handle case where we have existing playlist with gaps
+                    if existing_playlist_id and missing_positions:
+                        logger.info(f"\n{'='*60}")
+                        logger.info("Detected gaps in playlist - inserting missing videos...")
+                        logger.info(f"{'='*60}")
+                        
+                        # Get current playlist items
+                        existing_items = self.youtube_uploader.get_playlist_items(existing_playlist_id)
+                        
+                        # For each missing position, insert the video
+                        for expected_pos, expected_title in missing_positions:
+                            # Find the video_id for this title
+                            video_id = None
+                            if expected_title in existing_videos:
+                                video_id = existing_videos[expected_title]
+                            elif expected_title in track_to_title_map.values():
+                                # Find the track index for this title
+                                for idx, title in track_to_title_map.items():
+                                    if title == expected_title:
+                                        video_id = track_to_video_id_map.get(idx)
+                                        break
+                            
+                            if video_id:
+                                logger.info(f"Inserting video at position {expected_pos}: '{expected_title}'")
+                                self.youtube_uploader.insert_video_to_playlist(
+                                    existing_playlist_id,
+                                    video_id,
+                                    expected_pos
+                                )
+                            else:
+                                logger.warning(f"Could not find video_id for missing video: '{expected_title}'")
                     
                     logger.info(f"\n{'='*60}")
                     logger.info("SUCCESS!")
