@@ -527,11 +527,12 @@ class YouTubeUploader:
             
             playlist = playlist_response['items'][0]
             
-            # Update privacy status
+            # Update privacy status - must include snippet in part even when only updating status
             self.youtube.playlists().update(
-                part='status',
+                part='snippet,status',
                 body={
                     'id': playlist_id,
+                    'snippet': playlist['snippet'],  # Preserve existing snippet data
                     'status': {
                         'privacyStatus': privacy_status
                     }
