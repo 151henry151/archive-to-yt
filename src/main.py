@@ -197,6 +197,7 @@ class ArchiveToYouTube:
 
         try:
             # Step 1: Scrape metadata
+            _progress("Extracting metadata from archive.org...", 0, 1)
             logger.info("Step 1: Extracting metadata from archive.org...")
             scraper = ArchiveScraper(url)
             metadata = scraper.extract_metadata()
@@ -208,6 +209,7 @@ class ArchiveToYouTube:
             logger.info(f"Found {len(tracks)} tracks")
 
             # Step 2: Get audio file URLs
+            _progress("Finding audio file URLs...", 0, 1)
             logger.info("Step 2: Finding audio file URLs...")
             track_audio = scraper.get_audio_file_urls()
 
@@ -215,6 +217,7 @@ class ArchiveToYouTube:
                 raise ValueError("No audio files found for tracks")
 
             logger.info(f"Found {len(track_audio)} audio files")
+            num_tracks = len(track_audio)
 
             # Get identifier for unique filenames (resume capability)
             identifier = metadata.get('identifier', 'unknown')
@@ -268,6 +271,7 @@ class ArchiveToYouTube:
             logger.info(f"Downloaded background image: {image_path}")
 
             # Step 4: Check for existing videos on YouTube
+            _progress("Checking for existing videos on YouTube...", 0, num_tracks)
             logger.info(f"\n{'='*60}")
             logger.info("Step 4: Checking for existing videos on YouTube...")
             logger.info(f"{'='*60}")
@@ -327,6 +331,7 @@ class ArchiveToYouTube:
                     audio_url = track_info['url']
                     audio_filename = track_info.get('filename', 'audio')
 
+                    _progress(f"Track {i+1}/{num_tracks}: Downloading audio...", i + 0.1, num_tracks)
                     logger.info(f"\n{'='*60}")
                     logger.info(f"Processing track {i+1}/{len(track_audio)}: {track_num}. {track_name}")
                     logger.info(f"{'='*60}")
@@ -441,7 +446,9 @@ class ArchiveToYouTube:
                             skip_if_exists=True
                         )
                         created_video_files.append(video_path)
-                        
+
+                        _progress(f"Track {i+1}/{num_tracks}: Uploading to YouTube...", i + 0.7, num_tracks)
+
                         video_description = self.metadata_formatter.format_track_description(
                             track_info_clean,
                             metadata
@@ -465,6 +472,7 @@ class ArchiveToYouTube:
                         track_to_video_id_map[track_index] = video_id
                         uploaded_video_ids.append(video_id)
 
+                        _progress(f"Track {i+1}/{num_tracks} complete", i + 1, num_tracks)
                         logger.info(f"✓ Successfully processed track {i}")
 
                         # Only cleanup after successful YouTube upload
@@ -559,6 +567,7 @@ class ArchiveToYouTube:
                 else:
                     # Create new playlist
                     if uploaded_video_ids:
+                        _progress("Creating playlist on YouTube...", num_tracks, num_tracks)
                         logger.info(f"\n{'='*60}")
                         logger.info("Creating YouTube playlist...")
                         logger.info(f"{'='*60}")

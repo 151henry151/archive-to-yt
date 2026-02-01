@@ -18,6 +18,7 @@ const landingError = document.getElementById("landing-error");
 const btnSignin = document.getElementById("btn-signin");
 const signedIn = document.getElementById("signed-in");
 const btnPreview = document.getElementById("btn-preview");
+const previewLoading = document.getElementById("preview-loading");
 const previewTitle = document.getElementById("preview-title");
 const previewMeta = document.getElementById("preview-meta");
 const previewPlaylist = document.getElementById("preview-playlist");
@@ -26,6 +27,7 @@ const previewTotal = document.getElementById("preview-total");
 const btnBack = document.getElementById("btn-back");
 const btnProceed = document.getElementById("btn-proceed");
 const progressFill = document.getElementById("progress-fill");
+const progressIndeterminate = document.getElementById("progress-indeterminate");
 const progressText = document.getElementById("progress-text");
 const playlistLink = document.getElementById("playlist-link");
 const btnMakePublic = document.getElementById("btn-make-public");
@@ -75,6 +77,8 @@ async function handlePreview() {
     return;
   }
   showError(landingError, "");
+  btnPreview.disabled = true;
+  previewLoading.classList.remove("hidden");
   try {
     const res = await fetch(`${API}/preview`, {
       method: "POST",
@@ -91,6 +95,9 @@ async function handlePreview() {
     show(preview);
   } catch (e) {
     showError(landingError, e.message);
+  } finally {
+    btnPreview.disabled = false;
+    previewLoading.classList.add("hidden");
   }
 }
 
@@ -135,6 +142,8 @@ async function handleProceed() {
     currentJobId = data.job_id;
     show(processing);
     progressFill.style.width = "0%";
+    progressFill.classList.remove("hidden");
+    progressIndeterminate.classList.add("hidden");
     progressText.textContent = "Starting...";
     pollJob();
   } catch (e) {
@@ -145,12 +154,25 @@ async function handleProceed() {
 async function pollJob() {
   const res = await fetch(`${API}/job/${currentJobId}`, { credentials: "include" });
   const data = await res.json();
-  progressText.textContent = data.progress?.message || data.status;
-  if (data.progress?.total > 0) {
-    const pct = Math.round((100 * (data.progress.current || 0)) / data.progress.total);
-    progressFill.style.width = `${Math.min(pct, 95)}%`;
+  const msg = data.progress?.message || data.status;
+  const current = data.progress?.current ?? 0;
+  const total = data.progress?.total ?? 0;
+
+  progressText.textContent = msg;
+
+  if (total > 0) {
+    progressIndeterminate.classList.add("hidden");
+    progressFill.classList.remove("hidden");
+    const pct = Math.min(98, Math.round(100 * current / total));
+    progressFill.style.width = `${pct}%`;
+  } else {
+    progressFill.classList.add("hidden");
+    progressIndeterminate.classList.remove("hidden");
   }
+
   if (data.status === "complete") {
+    progressIndeterminate.classList.add("hidden");
+    progressFill.classList.remove("hidden");
     progressFill.style.width = "100%";
     progressText.textContent = "Complete!";
     playlistLink.href = data.playlist_url;
@@ -159,10 +181,12 @@ async function pollJob() {
     return;
   }
   if (data.status === "failed") {
+    progressIndeterminate.classList.add("hidden");
+    progressFill.classList.remove("hidden");
     progressText.textContent = "Failed: " + (data.error || "Unknown error");
     return;
   }
-  setTimeout(pollJob, 2000);
+  setTimeout(pollJob, 800);
 }
 
 async function handleMakePublic() {
