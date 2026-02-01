@@ -19,6 +19,8 @@ const btnSignin = document.getElementById("btn-signin");
 const signedIn = document.getElementById("signed-in");
 const btnPreview = document.getElementById("btn-preview");
 const previewLoading = document.getElementById("preview-loading");
+const previewLoadingStatus = document.getElementById("preview-loading-status");
+const previewLoadingProgress = document.getElementById("preview-loading-progress");
 const previewTitle = document.getElementById("preview-title");
 const previewMeta = document.getElementById("preview-meta");
 const previewPlaylist = document.getElementById("preview-playlist");
@@ -68,22 +70,6 @@ async function handleSignIn() {
   if (data.url) window.location.href = data.url;
 }
 
-const PREVIEW_STATUS_MESSAGES = [
-  "Fetching metadata from archive.org...",
-  "Finding tracks and audio files...",
-  "Getting track durations (this is the slowest step)...",
-  "Preparing preview...",
-];
-
-function startPreviewStatusCycle() {
-  let i = 0;
-  previewLoadingStatus.textContent = PREVIEW_STATUS_MESSAGES[0];
-  return setInterval(() => {
-    i = (i + 1) % PREVIEW_STATUS_MESSAGES.length;
-    previewLoadingStatus.textContent = PREVIEW_STATUS_MESSAGES[i];
-  }, 3000);
-}
-
 async function handlePreview() {
   const url = urlInput.value.trim();
   if (!url) {
@@ -95,9 +81,10 @@ async function handlePreview() {
     return;
   }
   showError(landingError, "");
-  // Immediately show loading state so user knows something is happening
   show(previewLoading);
-  const statusInterval = startPreviewStatusCycle();
+  if (previewLoadingStatus) previewLoadingStatus.textContent = "Starting...";
+  if (previewLoadingProgress) previewLoadingProgress.style.width = "0%";
+
   try {
     const res = await fetch(`${API}/preview`, {
       method: "POST",
@@ -109,15 +96,45 @@ async function handlePreview() {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || res.statusText);
     }
-    previewData = await res.json();
-    clearInterval(statusInterval);
-    renderPreview();
-    show(preview);
+    const { job_id } = await res.json();
+    await pollPreviewJob(job_id);
   } catch (e) {
-    clearInterval(statusInterval);
     show(landing);
     showError(landingError, e.message);
   }
+}
+
+async function pollPreviewJob(jobId) {
+  const res = await fetch(`${API}/preview/job/${jobId}`, { credentials: "include" });
+  if (!res.ok) {
+    show(landing);
+    showError(landingError, "Failed to get preview status");
+    return;
+  }
+  const data = await res.json();
+  const prog = data.progress || {};
+  const msg = prog.message || data.status;
+  const current = prog.current ?? 0;
+  const total = prog.total ?? 0;
+
+  if (previewLoadingStatus) previewLoadingStatus.textContent = msg;
+  if (previewLoadingProgress && total > 0) {
+    previewLoadingProgress.style.width = `${Math.min(98, Math.round(100 * current / total))}%`;
+  }
+
+  if (data.status === "complete" && data.result) {
+    if (previewLoadingProgress) previewLoadingProgress.style.width = "100%";
+    previewData = data.result;
+    renderPreview();
+    show(preview);
+    return;
+  }
+  if (data.status === "failed") {
+    show(landing);
+    showError(landingError, data.error || "Preview failed");
+    return;
+  }
+  setTimeout(() => pollPreviewJob(jobId), 800);
 }
 
 function renderPreview() {
