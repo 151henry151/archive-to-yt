@@ -2,20 +2,6 @@
 
 A Python tool that automatically downloads audio tracks from archive.org, creates videos with static background images, and uploads them to YouTube with proper metadata and playlists.
 
-## Screenshots
-
-The tool provides a preview of what will be uploaded before proceeding:
-
-![Preview of tracks and metadata](screenshots/Screenshot_2026-01-31_14-18-20.png)
-
-After confirmation, it processes each track and shows progress:
-
-![Processing tracks](screenshots/Screenshot_2026-01-31_14-18-53.png)
-
-Once complete, you can review and optionally publish the playlist:
-
-![Review and publish](screenshots/Screenshot_2026-01-31_14-19-15.png)
-
 ## Prerequisites
 
 - Python 3.8 or higher
