@@ -27,12 +27,27 @@ app = FastAPI(
 
 # Session secret (required for session cookies)
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-in-production")
+
+# When BASE_URL is set (path-based deployment), scope session cookie to app path
+# so it's sent correctly after OAuth redirects. Use Secure when served over HTTPS.
+_session_path = "/"
+_base_url = os.environ.get("BASE_URL", "")
+if _base_url and _base_url.startswith("https://"):
+    from urllib.parse import urlparse
+    _parsed = urlparse(_base_url)
+    if _parsed.path:
+        _session_path = _parsed.path.rstrip("/") or "/"
+    _https_only = True
+else:
+    _https_only = False
+
 app.add_middleware(
     SessionMiddleware,
     secret_key=SECRET_KEY,
     max_age=86400 * 7,  # 7 days
+    path=_session_path,
     same_site="lax",
-    https_only=False,  # nginx handles HTTPS
+    https_only=_https_only,
 )
 
 # CORS for local dev (relaxed; tighten for production)
