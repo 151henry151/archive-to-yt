@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-01-31
+
+### Fixed
+- **Web UI: "Edit titles & visibility" button** – Button did nothing when clicked. Added missing `showEditFromPreview` function and element references (`btnEdit`, `btnEditBack`, `editPlaylistTitle`, `editPlaylistDescription`, `editTracksContainer`) so the edit form loads correctly from the preview step.
+- **Terms/Privacy back link** – Back link on Terms and Privacy pages now points to the app root (`/archive-to-yt/app/`) instead of the landing page.
+- **Web UI session/login** – Reverted session cookie path and Secure flag changes that broke the login flow; keep default path and `https_only=False` for reliable session persistence after OAuth redirect.
+
+### Changed
+- **Web UI layout** – Removed duplicate Terms of Service and Privacy Policy links from the top of the app; they remain in the footer only.
+
 ## [1.1.0] - 2026-01-31
 
 ### Added
@@ -202,7 +212,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic cleanup of temporary files
 - Full documentation (README.md, ARCHITECTURE.md)
 
-[Unreleased]: https://github.com/151henry151/archive-to-yt/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/151henry151/archive-to-yt/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/151henry151/archive-to-yt/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/151henry151/archive-to-yt/compare/v1.1.0-beta...v1.1.0
 [1.1.0-beta]: https://github.com/151henry151/archive-to-yt/compare/v1.0.0...v1.1.0-beta
 [1.0.0]: https://github.com/151henry151/archive-to-yt/compare/v0.6.0-beta...v1.0.0

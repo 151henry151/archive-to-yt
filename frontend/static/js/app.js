@@ -29,6 +29,11 @@ const previewPlaylist = document.getElementById("preview-playlist");
 const previewTracks = document.getElementById("preview-tracks");
 const previewTotal = document.getElementById("preview-total");
 const btnBack = document.getElementById("btn-back");
+const btnEdit = document.getElementById("btn-edit");
+const btnEditBack = document.getElementById("btn-edit-back");
+const editPlaylistTitle = document.getElementById("edit-playlist-title");
+const editPlaylistDescription = document.getElementById("edit-playlist-description");
+const editTracksContainer = document.getElementById("edit-tracks");
 const btnProceed = document.getElementById("btn-proceed");
 const progressFill = document.getElementById("progress-fill");
 const progressIndeterminate = document.getElementById("progress-indeterminate");
@@ -158,6 +163,32 @@ function formatDuration(sec) {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function showEditFromPreview() {
+  if (!previewData) return;
+  const { playlist, tracks } = previewData;
+  if (editPlaylistTitle) editPlaylistTitle.value = playlist.title || "";
+  if (editPlaylistDescription) editPlaylistDescription.value = playlist.description || "";
+  if (editTracksContainer) {
+    editTracksContainer.innerHTML = tracks
+      .map(
+        (t) =>
+          `<div class="edit-track" data-number="${t.number}">
+            <label>Track ${t.number}: ${escapeHtml(t.name)}</label>
+            <input type="text" class="edit-video-title full-width" value="${escapeHtml(t.video_title || "")}" placeholder="Video title">
+            <textarea class="edit-video-description full-width" rows="2" placeholder="Description">${escapeHtml(t.description_preview || "")}</textarea>
+          </div>`
+      )
+      .join("");
+  }
+  show(editSection);
+}
+
+function escapeHtml(s) {
+  const div = document.createElement("div");
+  div.textContent = s;
+  return div.innerHTML;
 }
 
 async function handleProceed() {

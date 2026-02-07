@@ -105,7 +105,7 @@ python upload.py <URL> [--temp-dir DIR] [--credentials PATH]
 
 ### Web UI
 
-A browser-based interface with the same workflow: sign in with YouTube, enter an archive.org URL, preview, then process. Uploads run in the background with live progress; you can review the private playlist and optionally make it public.
+A browser-based interface with the same workflow: sign in with YouTube, enter an archive.org URL, preview, optionally edit titles and descriptions and set privacy (private/unlisted/public), then process. Uploads run in the background with live progress; you can review the playlist and optionally make it public.
 
 **Try it:** [Live Web UI](https://hromp.com/archive-to-yt/app/) | [Home page](https://hromp.com/archive-to-yt/)
 
@@ -181,6 +181,7 @@ For **path-based deployment** (app served under a path like `/archive-to-yt/app/
 
 ## Features
 
+- **Title/description overrides & privacy**: Web UI lets you edit playlist title/description and set visibility (private/unlisted/public) before processing
 - **Multi-disc support**: Automatically handles multi-disc recordings (d1t01, d2t01 patterns)
 - **Resume capability**: Detects and reuses existing downloads and videos
 - **Duplicate detection**: Checks for existing YouTube videos before uploading
